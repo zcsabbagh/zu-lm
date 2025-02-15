@@ -26,26 +26,30 @@ const MODELS = {
 } as const;
 
 type Provider = keyof typeof MODELS;
-type ModelType<P extends Provider> = typeof MODELS[P]['available'][number];
+type GroqModel = (typeof MODELS)['groq']['available'][number];
+type OpenAIModel = (typeof MODELS)['openai']['available'][number];
+type AnyModel = GroqModel | OpenAIModel;
+
+function isValidModel(provider: Provider, model: string): model is AnyModel {
+  return (MODELS[provider].available as readonly string[]).includes(model);
+}
 
 export async function createText(
-  provider = "groq", 
+  provider: Provider = "groq", 
   prompt = "What is love?", 
-  model: string | null = null,
-  stream = false
+  model: AnyModel | null = null
 ) {
   try {
     const client = provider === "groq" ? groq : openai;
     const selectedModel = model || MODELS[provider].default;
 
-    if (!MODELS[provider].available.includes(selectedModel)) {
+    if (!isValidModel(provider, selectedModel)) {
       throw new Error(`Invalid model for ${provider}. Available models: ${MODELS[provider].available.join(", ")}`);
     }
 
     const { text } = await generateText({
       model: client(selectedModel),
-      prompt: prompt,
-      stream: stream
+      prompt: prompt
     });
     return text;
   } catch (error) {
@@ -58,9 +62,12 @@ export async function createObject(
   schemaName: keyof typeof Schemas,
   customPrompt: string | null = null,
   provider: Provider = "groq",
-  model: ModelType<Provider> | null = null,
+  model: AnyModel | null = null,
 ) {
   try {
+    console.log('Creating object with:', { schemaName, provider, model });
+    console.log('Using prompt:', customPrompt);
+
     const schema = Schemas[schemaName];
     if (!schema) {
       throw new Error(`Schema "${schemaName}" not found. Available schemas: ${Object.keys(Schemas).join(", ")}`);
@@ -69,7 +76,7 @@ export async function createObject(
     const client = provider === "groq" ? groq : openai;
     const selectedModel = model || MODELS[provider].default;
 
-    if (!MODELS[provider].available.includes(selectedModel as any)) {
+    if (!isValidModel(provider, selectedModel)) {
       throw new Error(`Invalid model for ${provider}. Available models: ${MODELS[provider].available.join(", ")}`);
     }
 
@@ -84,24 +91,43 @@ export async function createObject(
       console.log('Raw model response:', text);
 
       try {
-        // First try to parse as JSON directly
-        let segments: Array<{ speaker: string; text: string }>;
+        // First try to parse the entire response as a JSON array
         try {
-          // Clean up the text for JSON parsing
-          const cleanedText = text.trim();
-          // If it's not already wrapped in brackets, wrap it
-          const jsonText = cleanedText.startsWith('[') ? cleanedText : `[${cleanedText}]`;
-          // Parse the JSON
-          segments = JSON.parse(jsonText);
-          console.log('Successfully parsed JSON response');
-        } catch (parseError) {
-          // If direct JSON parse fails, try to parse each segment individually
-          console.log('Direct JSON parse failed, trying segment-by-segment parsing');
-          const segmentStrings = text
-            .split(/}\s*,\s*{/)
-            .map(s => s.replace(/^\s*\[?\s*{?\s*/, '{').replace(/}\s*]\s*$/, '}'));
+          // Clean up the text - remove any text before the first [ and after the last ]
+          const jsonStart = text.indexOf('[');
+          const jsonEnd = text.lastIndexOf(']') + 1;
+          if (jsonStart === -1 || jsonEnd === 0) {
+            throw new Error('No JSON array found in response');
+          }
+          const jsonText = text.slice(jsonStart, jsonEnd);
           
-          segments = segmentStrings.map(segment => {
+          // Parse the cleaned JSON
+          const segments = JSON.parse(jsonText);
+          console.log('Successfully parsed complete JSON response:', segments);
+          
+          if (!Array.isArray(segments)) {
+            throw new Error('Parsed result is not an array');
+          }
+          
+          const transcript = segments.map(segment => ({
+            speaker: segment.speaker as "Speaker 1" | "Speaker 2",
+            text: segment.text.trim()
+          }));
+
+          // Validate against our schema
+          const parsed = schema.parse(transcript);
+          return parsed;
+        } catch (parseError) {
+          console.log('Failed to parse complete JSON, trying segment-by-segment parsing');
+          console.log('Parse error:', parseError);
+          
+          // If that fails, try to extract individual JSON objects
+          const segmentMatches = text.match(/\{\s*"speaker"\s*:\s*"[^"]+"\s*,\s*"text"\s*:\s*"[^"]+"\s*\}/g);
+          if (!segmentMatches) {
+            throw new Error('No valid segments found in response');
+          }
+
+          const segments = segmentMatches.map(segment => {
             try {
               return JSON.parse(segment);
             } catch (err) {
@@ -109,18 +135,18 @@ export async function createObject(
               throw new Error(`Invalid segment format: ${segment}`);
             }
           });
+
+          console.log('Successfully parsed segments:', segments);
+
+          const transcript = segments.map(segment => ({
+            speaker: segment.speaker as "Speaker 1" | "Speaker 2",
+            text: segment.text.trim()
+          }));
+
+          // Validate against our schema
+          const parsed = schema.parse(transcript);
+          return parsed;
         }
-
-        console.log('Parsed segments:', segments);
-
-        const transcript = segments.map(segment => ({
-          speaker: segment.speaker as "Speaker 1" | "Speaker 2",
-          text: segment.text.trim()
-        }));
-
-        // Validate against our schema
-        const parsed = schema.parse(transcript);
-        return parsed;
       } catch (error) {
         console.error('Error parsing response:', error);
         console.error('Parse error details:', error instanceof Error ? error.message : String(error));
