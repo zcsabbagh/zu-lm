@@ -29,6 +29,7 @@ pub struct StatusUpdate {
     pub message: String,
     pub elapsed_time: f64,
     pub timestamp: u64,
+    pub chain_of_thought: Option<String>,
 }
 
 impl SummaryState {
