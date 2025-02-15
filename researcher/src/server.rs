@@ -183,14 +183,19 @@ async fn serve_index() -> Html<&'static str> {
                 display: flex;
                 justify-content: space-between;
                 align-items: center;
+                transition: all 0.3s ease;
+                border-left: 4px solid transparent;
             }
             
             .step.active {
                 background-color: var(--primary-color);
+                border-left: 4px solid var(--text-color);
+                transform: translateX(10px);
             }
             
             .step.completed {
                 background-color: var(--success-color);
+                border-left: 4px solid var(--text-color);
             }
             
             .thinking-trace {
@@ -205,6 +210,12 @@ async fn serve_index() -> Html<&'static str> {
             
             .timer {
                 font-family: monospace;
+                color: var(--text-color);
+                min-width: 60px;
+                text-align: right;
+            }
+            
+            .timer.running {
                 color: var(--primary-color);
             }
             
@@ -286,7 +297,9 @@ async fn serve_index() -> Html<&'static str> {
 
         <script>
         let currentStep = 0;
-        let stepStartTime = Date.now();
+        let stepStartTimes = {};
+        let stepElapsedTimes = {};
+        let timerIntervals = {};
         const steps = ['query', 'research', 'summary', 'reflection', 'final'];
         let statusSource = null;
 
@@ -294,33 +307,83 @@ async fn serve_index() -> Html<&'static str> {
             return `${seconds.toFixed(1)}s`;
         }
 
-        function updateStep(stepName, status) {
-            const now = Date.now();
-            const elapsed = (now - stepStartTime) / 1000;
+        function startTimer(step) {
+            stepStartTimes[step] = Date.now();
+            const timerEl = document.getElementById(`timer-${step}`);
+            timerEl.classList.add('running');
             
+            // Clear any existing interval
+            if (timerIntervals[step]) {
+                clearInterval(timerIntervals[step]);
+            }
+            
+            // Start new interval
+            timerIntervals[step] = setInterval(() => {
+                const elapsed = (Date.now() - stepStartTimes[step]) / 1000;
+                timerEl.textContent = formatTime(elapsed);
+            }, 100);
+        }
+
+        function stopTimer(step) {
+            if (timerIntervals[step]) {
+                clearInterval(timerIntervals[step]);
+                delete timerIntervals[step];
+            }
+            
+            const timerEl = document.getElementById(`timer-${step}`);
+            timerEl.classList.remove('running');
+            
+            // Store final elapsed time
+            stepElapsedTimes[step] = (Date.now() - stepStartTimes[step]) / 1000;
+            timerEl.textContent = formatTime(stepElapsedTimes[step]);
+        }
+
+        function updateStep(stepName, status) {
             steps.forEach((step, index) => {
                 const el = document.getElementById(`step-${step}`);
                 el.className = 'step';
+                
                 if (step === stepName) {
                     el.className = 'step active';
                     currentStep = index;
-                    document.getElementById(`timer-${step}`).textContent = formatTime(elapsed);
+                    startTimer(step);
                 } else if (index < currentStep) {
                     el.className = 'step completed';
+                    if (timerIntervals[step]) {
+                        stopTimer(step);
+                    }
                 }
             });
             
             const trace = document.getElementById('thinking-trace');
-            trace.innerHTML += `<div>${status}</div>`;
+            trace.innerHTML += `<div>[${formatTime((Date.now() - stepStartTimes[stepName] || 0) / 1000)}] ${status}</div>`;
             trace.scrollTop = trace.scrollHeight;
+        }
+
+        function resetTimers() {
+            steps.forEach(step => {
+                if (timerIntervals[step]) {
+                    clearInterval(timerIntervals[step]);
+                    delete timerIntervals[step];
+                }
+                document.getElementById(`timer-${step}`).textContent = '0.0s';
+                document.getElementById(`timer-${step}`).classList.remove('running');
+            });
+            stepStartTimes = {};
+            stepElapsedTimes = {};
         }
 
         async function updateConfig() {
             const llm = document.getElementById('local-llm').value;
             const loops = parseInt(document.getElementById('max-loops').value);
+            const button = document.querySelector('.config-section button');
+            const originalText = button.textContent;
+            
+            button.textContent = 'Updating...';
+            button.disabled = true;
             
             try {
-                await fetch('/config', {
+                const response = await fetch('/config', {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json',
@@ -330,8 +393,24 @@ async fn serve_index() -> Html<&'static str> {
                         max_web_research_loops: loops
                     }),
                 });
+                
+                const data = await response.json();
+                button.textContent = '✓ Updated';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }, 2000);
+                
+                const trace = document.getElementById('thinking-trace');
+                trace.innerHTML += `<div>Configuration updated: ${data.message}</div>`;
+                trace.scrollTop = trace.scrollHeight;
             } catch (error) {
                 console.error('Failed to update config:', error);
+                button.textContent = '✗ Error';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }, 2000);
             }
         }
 
@@ -354,9 +433,9 @@ async fn serve_index() -> Html<&'static str> {
             result.style.display = 'block';
             result.textContent = 'Starting research...';
             currentStep = 0;
-            stepStartTime = Date.now();
             
             document.getElementById('thinking-trace').innerHTML = '';
+            resetTimers();
             connectToStatusStream();
             
             try {
@@ -371,6 +450,13 @@ async fn serve_index() -> Html<&'static str> {
                 const data = await response.json();
                 result.textContent = data.summary;
                 updateStep('final', data.status);
+                
+                // Stop all timers
+                steps.forEach(step => {
+                    if (timerIntervals[step]) {
+                        stopTimer(step);
+                    }
+                });
                 
                 if (statusSource) {
                     statusSource.close();
