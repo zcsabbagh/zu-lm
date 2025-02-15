@@ -17,7 +17,7 @@ const client = new ElevenLabsClient({
 
 export async function playPodcastTranscript(transcript: PodcastSegment[]) {
   try {
-    // First, generate all audio segments in parallel
+    // Generate all audio segments in parallel
     const audioPromises = transcript.map(segment => {
       const voiceId = VOICE_IDS[segment.speaker];
       if (!voiceId) {
