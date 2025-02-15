@@ -11,6 +11,8 @@
     "@ai-sdk/openai": "^1.1.11",
     "ai": "^4.1.40",
     "dotenv": "latest",
-    "elevenlabs": "^1.51.0"
+    "elevenlabs": "^1.51.0",
+    "lumaai": "^1.4.0",
+    "node-fetch": "^3.3.2"
   }
 }
