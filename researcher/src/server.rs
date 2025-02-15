@@ -68,6 +68,13 @@ impl From<anyhow::Error> for ApiError {
     }
 }
 
+// Add this new struct for the config response
+#[derive(serde::Serialize)]
+struct ConfigResponse {
+    local_llm: String,
+    max_web_research_loops: i32,
+}
+
 pub async fn run_server(config: Configuration) {
     let (status_tx, _) = broadcast::channel(100);
     let status_tx_clone = status_tx.clone();
@@ -84,6 +91,7 @@ pub async fn run_server(config: Configuration) {
         .route("/", get(serve_index))
         .route("/research", post(handle_research))
         .route("/config", put(update_config))
+        .route("/config", get(get_config))
         .route("/status", get(status_stream))
         .layer(CorsLayer::permissive())
         .with_state(state);
@@ -552,5 +560,20 @@ async fn update_config(
             "status": "Configuration updated",
             "message": "Changes will take effect on next research request"
         }))
+    )
+}
+
+// Add this new handler function
+async fn get_config(
+    State(state): State<Arc<AppState>>,
+) -> impl IntoResponse {
+    let graph = state.graph.lock().await;
+    
+    (
+        StatusCode::OK,
+        Json(ConfigResponse {
+            local_llm: graph.config.local_llm.clone(),
+            max_web_research_loops: graph.config.max_web_research_loops,
+        })
     )
 } 

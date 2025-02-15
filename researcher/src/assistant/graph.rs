@@ -231,12 +231,18 @@ impl ResearchGraph {
         self.status_tx = Some(tx);
     }
 
-    fn send_status(&self, phase: &str, message: &str) {
+    fn send_status(&self, phase: &str, message: &str, start_time: Option<SystemTime>) {
         if let Some(tx) = &self.status_tx {
+            let elapsed = start_time.map(|t| {
+                t.elapsed()
+                    .unwrap_or_default()
+                    .as_secs_f64()
+            }).unwrap_or_default();
+
             let _ = tx.send(StatusUpdate {
                 phase: phase.to_string(),
                 message: message.to_string(),
-                elapsed_time: 0.0,
+                elapsed_time: elapsed,
                 timestamp: SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
@@ -259,43 +265,56 @@ impl ResearchGraph {
             Box::new(SummarizerNode) as Box<dyn Node>,
         ];
         
-        // Initial research loop
-        self.send_status("query", "Generating initial search query...");
+        // Initial research loop with timing
+        let start_time = SystemTime::now();
+        self.send_status("query", "Generating initial search query...", None);
         nodes[0].process(self.state.clone(), &self.config).await?;
+        self.send_status("query", "Search query generated", Some(start_time));
         
-        self.send_status("research", "Performing web research...");
+        let start_time = SystemTime::now();
+        self.send_status("research", "Performing web research...", None);
         nodes[1].process(self.state.clone(), &self.config).await?;
+        self.send_status("research", "Web research completed", Some(start_time));
         
-        self.send_status("summary", "Summarizing research results...");
+        let start_time = SystemTime::now();
+        self.send_status("summary", "Summarizing research results...", None);
         nodes[2].process(self.state.clone(), &self.config).await?;
+        self.send_status("summary", "Summary completed", Some(start_time));
         
         // Additional research loops
         while {
             let state = self.state.lock().await;
             state.research_loop_count < self.config.max_web_research_loops
         } {
-            self.send_status("reflection", "Analyzing results and identifying knowledge gaps...");
+            let start_time = SystemTime::now();
+            self.send_status("reflection", "Analyzing results and identifying knowledge gaps...", None);
             println!("Starting reflection phase...");
             let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
             reflection_node.process(self.state.clone(), &self.config).await?;
+            self.send_status("reflection", "Knowledge gaps identified", Some(start_time));
             
-            self.send_status("reflection", "Starting follow-up research...");
-            println!("Starting follow-up research...");
-            
-            self.send_status("query", "Generating follow-up query...");
+            let start_time = SystemTime::now();
+            self.send_status("query", "Generating follow-up query...", None);
             nodes[0].process(self.state.clone(), &self.config).await?;
+            self.send_status("query", "Follow-up query generated", Some(start_time));
             
-            self.send_status("research", "Performing additional web research...");
+            let start_time = SystemTime::now();
+            self.send_status("research", "Performing additional web research...", None);
             nodes[1].process(self.state.clone(), &self.config).await?;
+            self.send_status("research", "Additional research completed", Some(start_time));
             
-            self.send_status("summary", "Updating research summary...");
+            let start_time = SystemTime::now();
+            self.send_status("summary", "Updating research summary...", None);
             nodes[2].process(self.state.clone(), &self.config).await?;
+            self.send_status("summary", "Summary updated", Some(start_time));
         }
         
-        self.send_status("final", "Finalizing research results...");
+        let start_time = SystemTime::now();
+        self.send_status("final", "Finalizing research results...", None);
         println!("Finalizing research...");
         let finalizer = Box::new(FinalizerNode) as Box<dyn Node>;
         finalizer.process(self.state.clone(), &self.config).await?;
+        self.send_status("final", "Research completed", Some(start_time));
         
         let state = self.state.lock().await;
         Ok(SummaryStateOutput {
