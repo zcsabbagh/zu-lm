@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/zane/zu-lm/target/debug/build/mime_guess-6cde930c97a3d6dd/out/mime_types_generated.rs
