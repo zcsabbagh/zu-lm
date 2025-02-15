@@ -67,30 +67,6 @@ pub fn format_sources(search_results: &SearchResponse) -> String {
         .join("\n")
 }
 
-pub async fn tavily_search(
-    query: &str,
-    include_raw_content: bool,
-    max_results: usize,
-) -> Result<SearchResponse> {
-    dotenv().ok();
-    let api_key = env::var("TAVILY_API_KEY")?;
-    let client = Client::new();
-    
-    let response = client
-        .post("https://api.tavily.com/search")
-        .header("Authorization", format!("Bearer {}", api_key))
-        .json(&serde_json::json!({
-            "query": query,
-            "max_results": max_results,
-            "include_raw_content": include_raw_content
-        }))
-        .send()
-        .await?;
-        
-    let search_response = response.json::<SearchResponse>().await?;
-    Ok(search_response)
-}
-
 pub async fn perplexity_search(
     query: &str,
     perplexity_search_loop_count: i32,
