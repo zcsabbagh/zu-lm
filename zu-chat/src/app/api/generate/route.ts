@@ -34,14 +34,11 @@ export async function POST(req: Request) {
       const prompt = getPodcastPrompt(report, language, minutes);
       console.log('Generated prompt:', prompt);
 
-      const podcast_transcript = await createObject("podcast", prompt, "openai", "gpt-4") as PodcastSegment[];
+      const podcast_transcript = await createObject("podcast", prompt, "groq", "llama-3.1-8b-instant") as PodcastSegment[];
       console.log('Generated podcast transcript:', JSON.stringify(podcast_transcript, null, 2));
 
-      const verifiedPodcast = await createObject("podcast", verifyPodcast(report, JSON.stringify(podcast_transcript), language, minutes), "openai", "gpt-4") as PodcastSegment[];
-      console.log('Verified podcast:', JSON.stringify(verifiedPodcast, null, 2));
-
       // Generate all audio segments in parallel
-      const audioPromises = verifiedPodcast.map((segment, index) => {
+      const audioPromises = podcast_transcript.map((segment, index) => {
         console.log(`Processing segment ${index}:`, segment);
         const voiceId = VOICE_IDS[segment.speaker];
         if (!voiceId) {

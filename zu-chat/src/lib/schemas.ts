@@ -62,7 +62,7 @@ export function getPodcastPrompt(report: string, language = "English", minutes =
   5. Format each response EXACTLY like this example (keep "speaker" in English):
   {
     "speaker": "Speaker 1",
-    "text": "Your text here in ${language}"
+    "text": "Your text here in ${language} in complete sentences"
   }
 
   Begin the conversation, which is written in ${language}, and will be ${minutes} minutes long.
