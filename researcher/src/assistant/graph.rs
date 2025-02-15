@@ -277,40 +277,53 @@ impl ResearchGraph {
             input.research_topic.clone(),
         )));
 
-        for (i, node) in self.nodes.iter().enumerate() {
-            let phase = match i {
-                0 => "query",
-                1 => "research",
-                2 => "summary",
-                3 => "reflection",
-                4 => "final",
-                _ => "unknown",
-            };
+        // Initial query generation
+        let query_node = &self.nodes[0];
+        self.send_status("query", "Starting initial query generation...");
+        query_node.process(state.clone(), &self.config).await?;
+        self.send_status("query", "Completed initial query generation");
 
-            // Send start phase status
-            self.send_status(phase, &format!("Starting {} phase...", phase));
-            
-            match node.process(state.clone(), &self.config).await {
-                Ok(_) => {
-                    // Send completion status
-                    self.send_status(phase, &format!("Completed {} phase", phase));
-                }
-                Err(e) => {
-                    let error_msg = format!("Error in {} phase: {}", phase, e);
-                    self.send_status("error", &error_msg);
-                    return Err(anyhow::anyhow!(error_msg));
-                }
+        // Main research loop
+        for loop_count in 0..self.config.max_web_research_loops {
+            self.send_status("loop", &format!("Starting research loop {} of {}", loop_count + 1, self.config.max_web_research_loops));
+
+            // Web research
+            let research_node = &self.nodes[1];
+            self.send_status("research", &format!("Starting web research for loop {}...", loop_count + 1));
+            research_node.process(state.clone(), &self.config).await?;
+            self.send_status("research", &format!("Completed web research for loop {}", loop_count + 1));
+
+            // Summarization
+            let summary_node = &self.nodes[2];
+            self.send_status("summary", &format!("Starting summary for loop {}...", loop_count + 1));
+            summary_node.process(state.clone(), &self.config).await?;
+            self.send_status("summary", &format!("Completed summary for loop {}", loop_count + 1));
+
+            // Skip reflection and query generation on the last loop
+            if loop_count < self.config.max_web_research_loops - 1 {
+                // Reflection and next query generation
+                let reflection_node = &self.nodes[3];
+                self.send_status("reflection", &format!("Starting reflection for loop {}...", loop_count + 1));
+                reflection_node.process(state.clone(), &self.config).await?;
+                self.send_status("reflection", &format!("Completed reflection for loop {}", loop_count + 1));
             }
 
-            // Small delay between phases to ensure status updates are received in order
+            // Small delay between loops to ensure status updates are received in order
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
+
+        // Final summary compilation
+        let finalizer_node = &self.nodes[4];
+        self.send_status("final", "Starting final summary compilation...");
+        finalizer_node.process(state.clone(), &self.config).await?;
+        self.send_status("final", "Completed final summary compilation");
 
         let final_state = state.lock().await;
         let summary = final_state.running_summary.clone().unwrap_or_default();
         
         // Send final status update with summary
-        self.send_status("complete", &format!("Research completed. Summary length: {} chars", summary.len()));
+        self.send_status("complete", &format!("Research completed after {} loops. Summary length: {} chars", 
+            self.config.max_web_research_loops, summary.len()));
         
         Ok(SummaryStateOutput {
             running_summary: summary,
