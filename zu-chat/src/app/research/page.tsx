@@ -66,6 +66,8 @@ export default function ResearchPage() {
   const [status, setStatus] = useState('');
   const [summary, setSummary] = useState('');
   const [phase, setPhase] = useState('');
+  const [currentLoop, setCurrentLoop] = useState(0);
+  const [totalLoops, setTotalLoops] = useState(0);
   const [statusHistory, setStatusHistory] = useState<StatusMessage[]>([]);
   const [statusSource, setStatusSource] = useState<EventSource | null>(null);
   const [retryCount, setRetryCount] = useState(0);
@@ -101,6 +103,15 @@ export default function ResearchPage() {
         setStatus(data.message);
         setPhase(data.phase);
         setRetryCount(0); // Reset retry count on successful message
+
+        // Update loop progress
+        if (data.message.includes('Starting research loop')) {
+          const match = data.message.match(/loop (\d+) of (\d+)/);
+          if (match) {
+            setCurrentLoop(parseInt(match[1]));
+            setTotalLoops(parseInt(match[2]));
+          }
+        }
         
         // Add to status history
         setStatusHistory(prev => [...prev, {
@@ -159,6 +170,8 @@ export default function ResearchPage() {
     setPhase('');
     setStatusHistory([]);
     setRetryCount(0);
+    setCurrentLoop(0);
+    setTotalLoops(0);
 
     try {
       // First establish SSE connection
@@ -213,6 +226,31 @@ export default function ResearchPage() {
     router.push('/');
   };
 
+  // Group status messages by loop
+  const groupedStatusHistory = statusHistory.reduce((groups, status) => {
+    let loop = 0;
+    if (status.message.includes('Starting research loop')) {
+      const match = status.message.match(/loop (\d+) of/);
+      if (match) {
+        loop = parseInt(match[1]);
+      }
+    } else if (status.phase === 'query' || status.phase === 'init') {
+      loop = 0; // Initial setup phase
+    } else if (status.phase === 'final' || status.phase === 'complete') {
+      loop = -1; // Final phase
+    } else {
+      // Find the most recent loop number from previous messages
+      for (let i = groups.length - 1; i >= 0; i--) {
+        if (groups[i].loop !== undefined) {
+          loop = groups[i].loop;
+          break;
+        }
+      }
+    }
+    
+    return [...groups, { ...status, loop }];
+  }, [] as Array<StatusMessage & { loop: number }>);
+
   return (
     <div className="container mx-auto px-4 py-8">
       <h1 className="text-2xl font-bold mb-6">Research Assistant</h1>
@@ -249,6 +287,19 @@ export default function ResearchPage() {
               Phase: {phase}
             </div>
           )}
+          {totalLoops > 0 && (
+            <div className="mb-2">
+              <div className="text-sm text-gray-500 mb-1">
+                Research Loop: {currentLoop} of {totalLoops}
+              </div>
+              <div className="w-full bg-gray-200 rounded-full h-2.5">
+                <div 
+                  className="bg-blue-500 h-2.5 rounded-full transition-all duration-500"
+                  style={{ width: `${(currentLoop / totalLoops) * 100}%` }}
+                ></div>
+              </div>
+            </div>
+          )}
           <div className="text-gray-700">{formatMessage(status)}</div>
         </div>
       )}
@@ -257,8 +308,12 @@ export default function ResearchPage() {
         <div className="mb-4">
           <h2 className="text-lg font-semibold mb-2">Research Progress</h2>
           <div className="bg-gray-50 p-4 rounded-md max-h-[500px] overflow-y-auto">
-            {statusHistory.map((status, index) => (
-              <div key={index} className="mb-4">
+            {groupedStatusHistory.map((status, index) => (
+              <div key={index} className={`mb-4 ${
+                status.loop === 0 ? 'bg-blue-50' : 
+                status.loop === -1 ? 'bg-green-50' : 
+                'border-l-4 border-blue-200'
+              } p-3 rounded-md`}>
                 <div className="flex items-center gap-2 mb-1">
                   <span className="text-xs text-gray-500">
                     [{new Date(status.timestamp * 1000).toLocaleTimeString()}]
@@ -266,6 +321,11 @@ export default function ResearchPage() {
                   <span className="text-xs font-medium px-2 py-1 bg-gray-200 rounded-full">
                     {status.phase}
                   </span>
+                  {status.loop > 0 && (
+                    <span className="text-xs text-gray-500">
+                      Loop {status.loop}
+                    </span>
+                  )}
                 </div>
                 <div className={`ml-4 ${status.phase === 'error' ? 'text-red-600' : 'text-gray-700'}`}>
                   {formatMessage(status.message)}
