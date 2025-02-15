@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import ReactMarkdown from 'react-markdown';
 
 interface StatusUpdate {
   phase: string;
@@ -9,18 +10,33 @@ interface StatusUpdate {
   elapsed_time: number;
   timestamp: number;
   summary?: string;
+  chain_of_thought?: string;
 }
 
 interface StatusMessage {
   phase: string;
   message: string;
   timestamp: number;
+  chain_of_thought?: string;
 }
 
-const formatMessage = (message: string) => {
+const formatMessage = (message: string, chain_of_thought?: string) => {
   // Remove the phase prefix if it exists
   const cleanMessage = message.replace(/^\[[^\]]+\]\s*/, '');
   
+  // If there's chain of thought, format it specially
+  if (chain_of_thought) {
+    return (
+      <div>
+        <div>{cleanMessage}</div>
+        <div className="bg-yellow-50 p-3 rounded-md my-2">
+          <div className="text-yellow-600 font-medium mb-1">Chain of Thought:</div>
+          <div className="whitespace-pre-wrap text-sm text-gray-700">{chain_of_thought}</div>
+        </div>
+      </div>
+    );
+  }
+
   // If the message contains <think>, format it specially
   if (cleanMessage.includes('<think>')) {
     const thinkingContent = cleanMessage.split('<think>')[1].split('</think>')[0].trim();
@@ -118,6 +134,7 @@ export default function ResearchPage() {
           phase: data.phase,
           message: data.message,
           timestamp: data.timestamp,
+          chain_of_thought: data.chain_of_thought,
         }]);
         
         if (data.phase === 'complete') {
@@ -253,82 +270,69 @@ export default function ResearchPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <h1 className="text-2xl font-bold mb-6">Research Assistant</h1>
-      
-      <form onSubmit={handleSubmit} className="mb-8">
-        <div className="mb-4">
-          <label htmlFor="topic" className="block text-sm font-medium mb-2">
-            Research Topic
-          </label>
-          <input
-            type="text"
-            id="topic"
-            value={topic}
-            onChange={(e) => setTopic(e.target.value)}
-            className="w-full p-2 border rounded-md"
-            placeholder="Enter a topic to research..."
-            disabled={isLoading}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={isLoading || !topic}
-          className="bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
-        >
-          {isLoading ? 'Researching...' : 'Start Research'}
-        </button>
-      </form>
+      <div className="mb-6">
+        <h1 className="text-2xl font-bold mb-4">Research Assistant</h1>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label htmlFor="topic" className="block text-sm font-medium mb-2">
+              Research Topic
+            </label>
+            <input
+              type="text"
+              id="topic"
+              value={topic}
+              onChange={(e) => setTopic(e.target.value)}
+              className="w-full p-2 border rounded-md"
+              placeholder="Enter a topic to research..."
+              disabled={isLoading}
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={isLoading || !topic}
+            className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
+          >
+            {isLoading ? 'Researching...' : 'Start Research'}
+          </button>
+        </form>
+      </div>
 
-      {(status || phase) && (
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold mb-2">Current Status</h2>
-          {phase && (
-            <div className="text-sm text-gray-500 mb-1">
-              Phase: {phase}
+      {isLoading && (
+        <div className="mb-6">
+          <div className="flex items-center mb-2">
+            <div className="w-full bg-gray-200 rounded-full h-2.5">
+              <div
+                className="bg-blue-600 h-2.5 rounded-full"
+                style={{ width: `${(currentLoop / totalLoops) * 100}%` }}
+              ></div>
             </div>
-          )}
-          {totalLoops > 0 && (
-            <div className="mb-2">
-              <div className="text-sm text-gray-500 mb-1">
-                Research Loop: {currentLoop} of {totalLoops}
-              </div>
-              <div className="w-full bg-gray-200 rounded-full h-2.5">
-                <div 
-                  className="bg-blue-500 h-2.5 rounded-full transition-all duration-500"
-                  style={{ width: `${(currentLoop / totalLoops) * 100}%` }}
-                ></div>
-              </div>
-            </div>
-          )}
-          <div className="text-gray-700">{formatMessage(status)}</div>
+            <span className="ml-2 text-sm text-gray-600">
+              {currentLoop}/{totalLoops}
+            </span>
+          </div>
+          <p className="text-sm text-gray-600">{status}</p>
         </div>
       )}
 
       {statusHistory.length > 0 && (
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold mb-2">Research Progress</h2>
-          <div className="bg-gray-50 p-4 rounded-md max-h-[500px] overflow-y-auto">
-            {groupedStatusHistory.map((status, index) => (
-              <div key={index} className={`mb-4 ${
-                status.loop === 0 ? 'bg-blue-50' : 
-                status.loop === -1 ? 'bg-green-50' : 
-                'border-l-4 border-blue-200'
-              } p-3 rounded-md`}>
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-xs text-gray-500">
-                    [{new Date(status.timestamp * 1000).toLocaleTimeString()}]
-                  </span>
-                  <span className="text-xs font-medium px-2 py-1 bg-gray-200 rounded-full">
-                    {status.phase}
-                  </span>
-                  {status.loop > 0 && (
-                    <span className="text-xs text-gray-500">
-                      Loop {status.loop}
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold">Research Progress</h2>
+          <div className="border rounded-lg divide-y">
+            {statusHistory.map((status, index) => (
+              <div key={index} className="p-4">
+                <div className="flex items-start">
+                  <div className="flex-shrink-0">
+                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
+                      status.phase === 'error' ? 'bg-red-100 text-red-800' :
+                      status.phase === 'complete' ? 'bg-green-100 text-green-800' :
+                      'bg-blue-100 text-blue-800'
+                    }`}>
+                      {status.phase}
                     </span>
-                  )}
-                </div>
-                <div className={`ml-4 ${status.phase === 'error' ? 'text-red-600' : 'text-gray-700'}`}>
-                  {formatMessage(status.message)}
+                  </div>
+                  <div className="ml-4 flex-grow">
+                    {formatMessage(status.message, status.chain_of_thought)}
+                  </div>
                 </div>
               </div>
             ))}
@@ -336,17 +340,19 @@ export default function ResearchPage() {
         </div>
       )}
 
-      {summary && (
-        <div className="mb-4">
-          <h2 className="text-lg font-semibold mb-2">Research Summary</h2>
-          <div className="bg-gray-50 p-4 rounded-md">
-            <p className="whitespace-pre-wrap">{summary}</p>
+      {summary && !isLoading && (
+        <div className="mt-6 space-y-4">
+          <h2 className="text-lg font-semibold">Research Summary</h2>
+          <div className="bg-white p-6 rounded-lg border">
+            <div className="prose max-w-none">
+              <ReactMarkdown>{summary}</ReactMarkdown>
+            </div>
           </div>
           <button
             onClick={handleCreatePodcast}
-            className="mt-4 bg-green-500 text-white px-4 py-2 rounded-md"
+            className="w-full bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
           >
-            Create Podcast from Research
+            Create Podcast from Summary
           </button>
         </div>
       )}
