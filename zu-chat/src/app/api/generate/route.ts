@@ -42,10 +42,9 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
         throw new Error('Invalid podcast transcript format - expected array');
       }
 
-      // Generate all audio segments sequentially
-      const audioSegments = [];
-      for (const segment of podcast_transcript) {
-        console.log(`Processing segment:`, segment);
+      // Generate all audio segments in parallel
+      const audioPromises = podcast_transcript.map(async (segment) => {
+        console.log(`Preparing segment:`, segment);
         const voiceId = VOICE_IDS[segment.speaker];
         if (!voiceId) {
           console.error('Invalid speaker:', segment.speaker);
@@ -82,14 +81,16 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
           const audioData = await response.arrayBuffer();
           
           // Convert to base64
-          const base64Audio = Buffer.from(audioData).toString('base64');
-          audioSegments.push(base64Audio);
-          console.log(`Successfully generated audio for segment ${audioSegments.length}`);
+          return Buffer.from(audioData).toString('base64');
         } catch (error: unknown) {
           console.error(`Error generating audio for segment:`, error);
           throw new Error(`Failed to generate audio for segment: ${error instanceof Error ? error.message : String(error)}`);
         }
-      }
+      });
+
+      // Wait for all audio segments to complete
+      const audioSegments = await Promise.all(audioPromises);
+      console.log(`Successfully generated ${audioSegments.length} audio segments`);
       
       // Send the audio segments and transcript as response
       await writer.write(encoder.encode(JSON.stringify({
