@@ -23,6 +23,14 @@ pub struct SummaryStateOutput {
     pub running_summary: String,
 }
 
+#[derive(Clone, serde::Serialize)]
+pub struct StatusUpdate {
+    pub phase: String,
+    pub message: String,
+    pub elapsed_time: f64,
+    pub timestamp: u64,
+}
+
 impl SummaryState {
     pub fn new() -> Self {
         Self::default()
