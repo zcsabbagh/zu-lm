@@ -14,7 +14,7 @@ export const Schemas = {
 };
 
 // Create a function to generate the prompt with the report
-export function getPodcastPrompt(report, language = "English", minutes = "5") {
+export function getPodcastPrompt(report, language = "English", minutes = "5", ) {
   return `
   You are an expert podcast script writer for multi-speaker podcasts.
   You are writing this podcast in ${language}. This podcast will be ${minutes} minutes long.
@@ -34,7 +34,7 @@ export function getPodcastPrompt(report, language = "English", minutes = "5") {
   5. Format each response EXACTLY like this example (keep "speaker" in English):
   {
     "speaker": "Speaker 1",
-    "text": "Your text here in ${language}"
+    "text": "Your text here in ${language} in complete sentences"
   }
 
   Begin the conversation, which is written in ${language}, and will be ${minutes} minutes long.
