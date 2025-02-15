@@ -2,28 +2,25 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SummaryState {
-    #[serde(default)]
-    pub research_topic: Option<String>,
-    #[serde(default)]
+    pub research_topic: String,
     pub search_query: Option<String>,
-    #[serde(default)]
-    pub web_research_results: Vec<String>,
     #[serde(default)]
     pub sources_gathered: Vec<String>,
     #[serde(default)]
     pub research_loop_count: i32,
     #[serde(default)]
+    pub web_research_results: Vec<String>,
     pub running_summary: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryStateInput {
-    pub research_topic: Option<String>,
+    pub research_topic: String,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SummaryStateOutput {
-    pub running_summary: Option<String>,
+    pub running_summary: String,
 }
 
 impl SummaryState {
@@ -33,7 +30,7 @@ impl SummaryState {
 
     pub fn with_research_topic(research_topic: String) -> Self {
         Self {
-            research_topic: Some(research_topic),
+            research_topic,
             ..Default::default()
         }
     }

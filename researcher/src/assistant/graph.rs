@@ -16,7 +16,7 @@ use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput};
 use super::utils::{perplexity_search, tavily_search, format_sources};
 
 #[async_trait]
-pub trait Node {
+pub trait Node: Send + Sync {
     async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()>;
 }
 
@@ -31,18 +31,21 @@ impl Node for QueryGeneratorNode {
     async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()> {
         let research_topic = {
             let state = state.lock().await;
-            state.research_topic.clone().unwrap_or_default()
+            state.research_topic.clone()
         };
         
-        let instructions = format_query_writer_instructions(&research_topic);
+        println!("Initializing Ollama with model: {}", config.local_llm);
         let ollama = Ollama::default();
         
+        let instructions = format_query_writer_instructions(&research_topic);
         let request = GenerationRequest::new(
             config.local_llm.clone(),
             format!("{}\n\nGenerate a query for web search:", instructions),
         );
         
-        let response = ollama.generate(request).await?;
+        println!("Sending request to Ollama...");
+        let response = ollama.generate(request).await
+            .map_err(|e| anyhow::anyhow!("Ollama request failed: {}", e))?;
         
         // Try to parse as JSON, if fails, use the entire response as the query
         let search_query = match serde_json::from_str::<Value>(&response.response) {
@@ -92,7 +95,7 @@ impl Node for SummarizerNode {
         let (research_topic, existing_summary, latest_research) = {
             let state = state.lock().await;
             (
-                state.research_topic.clone().unwrap_or_default(),
+                state.research_topic.clone(),
                 state.running_summary.clone(),
                 state.web_research_results.last().cloned(),
             )
@@ -143,7 +146,7 @@ impl Node for ReflectionNode {
         let (research_topic, running_summary) = {
             let state = state.lock().await;
             (
-                state.research_topic.clone().unwrap_or_default(),
+                state.research_topic.clone(),
                 state.running_summary.clone().unwrap_or_default(),
             )
         };
@@ -244,7 +247,7 @@ impl ResearchGraph {
         
         let state = self.state.lock().await;
         Ok(SummaryStateOutput {
-            running_summary: state.running_summary.clone(),
+            running_summary: state.running_summary.clone().unwrap_or_default(),
         })
     }
 } 

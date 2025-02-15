@@ -1,81 +1,15 @@
-pub const QUERY_WRITER_INSTRUCTIONS: &str = r#"Your goal is to generate a targeted web search query.
-The query will gather information related to a specific topic.
+pub const QUERY_WRITER_INSTRUCTIONS: &str = r#"You are a research assistant tasked with generating effective search queries.
+Your goal is to create a search query that will help gather relevant information about the research topic.
+Format your response as JSON with a single key 'query' containing the search query."#;
 
-<TOPIC>
-{research_topic}
-</TOPIC>
+pub const SUMMARIZER_INSTRUCTIONS: &str = r#"You are a research assistant tasked with summarizing information.
+Analyze the search results and create a comprehensive summary that addresses the research topic.
+If there's an existing summary, integrate the new information with it."#;
 
-<FORMAT>
-Format your response as a JSON object with ALL three of these exact keys:
-   - "query": The actual search query string
-   - "aspect": The specific aspect of the topic being researched
-   - "rationale": Brief explanation of why this query is relevant
-</FORMAT>
-
-<EXAMPLE>
-Example output:
-{
-    "query": "machine learning transformer architecture explained",
-    "aspect": "technical architecture",
-    "rationale": "Understanding the fundamental structure of transformer models"
-}
-</EXAMPLE>
-
-Provide your response in JSON format:"#;
-
-pub const SUMMARIZER_INSTRUCTIONS: &str = r#"
-<GOAL>
-Generate a high-quality summary of the web search results and keep it concise / related to the user topic.
-</GOAL>
-
-<REQUIREMENTS>
-When creating a NEW summary:
-1. Highlight the most relevant information related to the user topic from the search results
-2. Ensure a coherent flow of information
-
-When EXTENDING an existing summary:
-1. Read the existing summary and new search results carefully.
-2. Compare the new information with the existing summary.
-3. For each piece of new information:
-    a. If it's related to existing points, integrate it into the relevant paragraph.
-    b. If it's entirely new but relevant, add a new paragraph with a smooth transition.
-    c. If it's not relevant to the user topic, skip it.
-4. Ensure all additions are relevant to the user's topic.
-5. Verify that your final output differs from the input summary.
-
-</REQUIREMENTS>
-
-<FORMATTING>
-- Start directly with the updated summary, without preamble or titles. Do not use XML tags in the output.
-</FORMATTING>"#;
-
-pub const REFLECTION_INSTRUCTIONS: &str = r#"You are an expert research assistant analyzing a summary about {research_topic}.
-
-<GOAL>
-1. Identify knowledge gaps or areas that need deeper exploration
-2. Generate a follow-up question that would help expand your understanding
-3. Focus on technical details, implementation specifics, or emerging trends that weren't fully covered
-</GOAL>
-
-<REQUIREMENTS>
-Ensure the follow-up question is self-contained and includes necessary context for web search.
-</REQUIREMENTS>
-
-<FORMAT>
-Format your response as a JSON object with these exact keys:
-- knowledge_gap: Describe what information is missing or needs clarification
-- follow_up_query: Write a specific question to address this gap
-</FORMAT>
-
-<EXAMPLE>
-Example output:
-{
-    "knowledge_gap": "The summary lacks information about performance metrics and benchmarks",
-    "follow_up_query": "What are typical performance benchmarks and metrics used to evaluate [specific technology]?"
-}
-</EXAMPLE>
-
-Provide your analysis in JSON format:"#;
+pub const REFLECTION_INSTRUCTIONS: &str = r#"You are a research assistant tasked with identifying knowledge gaps.
+Analyze the current summary and identify what important aspects of {research_topic} still need to be explored.
+Generate a follow-up search query to fill these gaps.
+Format your response as JSON with a single key 'follow_up_query' containing the search query."#;
 
 pub fn format_query_writer_instructions(research_topic: &str) -> String {
     QUERY_WRITER_INSTRUCTIONS.replace("{research_topic}", research_topic)
