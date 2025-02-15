@@ -1,11 +1,12 @@
-pub mod assistant {
-    pub mod configuration;
-    pub mod graph;
-    pub mod prompts;
-    pub mod state;
-    pub mod utils;
-}
+pub mod assistant;
+pub mod server;
 
 pub use assistant::configuration::Configuration;
 pub use assistant::graph::ResearchGraph;
-pub use assistant::state::{SummaryState, SummaryStateInput, SummaryStateOutput}; 
+pub use assistant::state::{SummaryState, SummaryStateInput, SummaryStateOutput};
+
+use dotenv::dotenv;
+
+pub fn init() {
+    dotenv().ok();
+} 
