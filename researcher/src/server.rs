@@ -1,22 +1,46 @@
 use axum::{
-    routing::{post, get},
+    routing::{post, get, put},
     Router,
     Json,
     extract::State,
     http::StatusCode,
-    response::{IntoResponse, Response, Html},
+    response::{IntoResponse, Response, Html, sse::{Event, Sse}},
 };
-use std::sync::Arc;
-use std::net::SocketAddr;
+use std::{
+    sync::Arc,
+    net::SocketAddr,
+    convert::Infallible,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
 use crate::assistant::{
     configuration::Configuration,
     state::SummaryStateInput,
     graph::ResearchGraph,
 };
 use tower_http::cors::CorsLayer;
+use futures::stream::Stream;
+use tokio::sync::broadcast;
+use serde_json::json;
+use serde::Deserialize;
+use tokio::sync::Mutex;
+
+#[derive(Clone, serde::Serialize)]
+struct StatusUpdate {
+    phase: String,
+    message: String,
+    elapsed_time: f64,
+    timestamp: u64,
+}
+
+#[derive(Deserialize)]
+struct ConfigUpdate {
+    local_llm: Option<String>,
+    max_web_research_loops: Option<i32>,
+}
 
 pub struct AppState {
-    graph: ResearchGraph,
+    graph: Arc<Mutex<ResearchGraph>>,
+    status_tx: broadcast::Sender<StatusUpdate>,
 }
 
 #[derive(serde::Deserialize)]
@@ -53,13 +77,18 @@ impl From<anyhow::Error> for ApiError {
 }
 
 pub async fn run_server(config: Configuration) {
+    let (status_tx, _) = broadcast::channel(100);
+
     let state = Arc::new(AppState {
-        graph: ResearchGraph::new(config),
+        graph: Arc::new(Mutex::new(ResearchGraph::new(config))),
+        status_tx,
     });
 
     let app = Router::new()
         .route("/", get(serve_index))
         .route("/research", post(handle_research))
+        .route("/config", put(update_config))
+        .route("/status", get(status_stream))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -81,108 +110,256 @@ async fn serve_index() -> Html<&'static str> {
     <head>
         <title>Research Assistant</title>
         <style>
+            :root {
+                --bg-color: #1a1a1a;
+                --text-color: #e0e0e0;
+                --primary-color: #3498db;
+                --secondary-color: #2c3e50;
+                --success-color: #27ae60;
+                --error-color: #e74c3c;
+                --border-color: #2c2c2c;
+            }
+            
             body {
-                font-family: Arial, sans-serif;
-                max-width: 800px;
+                font-family: 'Inter', -apple-system, sans-serif;
+                background-color: var(--bg-color);
+                color: var(--text-color);
+                max-width: 1000px;
                 margin: 0 auto;
                 padding: 20px;
             }
+            
             .container {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 20px;
+            }
+            
+            .main-content {
                 display: flex;
                 flex-direction: column;
                 gap: 20px;
             }
-            textarea {
-                width: 100%;
-                height: 100px;
-                padding: 10px;
+            
+            .sidebar {
+                background-color: var(--secondary-color);
+                padding: 20px;
+                border-radius: 8px;
             }
+            
+            textarea, input {
+                width: 100%;
+                padding: 10px;
+                background-color: var(--secondary-color);
+                border: 1px solid var(--border-color);
+                color: var(--text-color);
+                border-radius: 4px;
+            }
+            
+            textarea {
+                height: 100px;
+                resize: vertical;
+            }
+            
             button {
                 padding: 10px 20px;
-                background-color: #007bff;
-                color: white;
+                background-color: var(--primary-color);
+                color: var(--text-color);
                 border: none;
                 border-radius: 4px;
                 cursor: pointer;
+                transition: opacity 0.2s;
             }
-            #status {
-                padding: 10px;
-                margin-top: 10px;
-                background-color: #f8f9fa;
+            
+            button:hover {
+                opacity: 0.9;
+            }
+            
+            .step {
+                padding: 12px;
+                margin: 4px 0;
+                background-color: var(--secondary-color);
                 border-radius: 4px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
             }
+            
+            .step.active {
+                background-color: var(--primary-color);
+            }
+            
+            .step.completed {
+                background-color: var(--success-color);
+            }
+            
+            .thinking-trace {
+                font-family: monospace;
+                padding: 10px;
+                background-color: var(--secondary-color);
+                border-radius: 4px;
+                margin-top: 10px;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .timer {
+                font-family: monospace;
+                color: var(--primary-color);
+            }
+            
             #result {
                 white-space: pre-wrap;
                 padding: 20px;
-                border: 1px solid #ddd;
+                background-color: var(--secondary-color);
                 border-radius: 4px;
                 display: none;
-                margin-top: 20px;
             }
-            .step {
-                padding: 8px;
-                margin: 4px 0;
-                background-color: #e9ecef;
+            
+            .config-section {
+                margin-top: 20px;
+                padding: 15px;
+                background-color: var(--secondary-color);
                 border-radius: 4px;
             }
-            .step.active {
-                background-color: #cce5ff;
+            
+            .config-item {
+                margin: 10px 0;
             }
-            .step.completed {
-                background-color: #d4edda;
+            
+            label {
+                display: block;
+                margin-bottom: 5px;
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>Research Assistant</h1>
-            <div>
-                <label for="topic">Research Topic:</label>
-                <textarea id="topic" placeholder="Enter your research topic..."></textarea>
+            <div class="main-content">
+                <h1>Research Assistant</h1>
+                <div>
+                    <label for="topic">Research Topic:</label>
+                    <textarea id="topic" placeholder="Enter your research topic..."></textarea>
+                </div>
+                <button onclick="submitResearch()">Start Research</button>
+                <div id="steps">
+                    <div class="step" id="step-query">
+                        <span>1. Generating Search Query</span>
+                        <span class="timer" id="timer-query">0.0s</span>
+                    </div>
+                    <div class="step" id="step-research">
+                        <span>2. Web Research</span>
+                        <span class="timer" id="timer-research">0.0s</span>
+                    </div>
+                    <div class="step" id="step-summary">
+                        <span>3. Summarizing Results</span>
+                        <span class="timer" id="timer-summary">0.0s</span>
+                    </div>
+                    <div class="step" id="step-reflection">
+                        <span>4. Reflection & Follow-up</span>
+                        <span class="timer" id="timer-reflection">0.0s</span>
+                    </div>
+                    <div class="step" id="step-final">
+                        <span>5. Finalizing Results</span>
+                        <span class="timer" id="timer-final">0.0s</span>
+                    </div>
+                </div>
+                <div id="thinking-trace" class="thinking-trace"></div>
+                <div id="result"></div>
             </div>
-            <button onclick="submitResearch()">Start Research</button>
-            <div id="steps">
-                <div class="step" id="step-query">1. Generating Search Query</div>
-                <div class="step" id="step-research">2. Web Research</div>
-                <div class="step" id="step-summary">3. Summarizing Results</div>
-                <div class="step" id="step-reflection">4. Reflection & Follow-up</div>
-                <div class="step" id="step-final">5. Finalizing Results</div>
+            
+            <div class="sidebar">
+                <h2>Configuration</h2>
+                <div class="config-section">
+                    <div class="config-item">
+                        <label for="local-llm">Local LLM Model:</label>
+                        <input type="text" id="local-llm" value="deepseek-r1:8b">
+                    </div>
+                    <div class="config-item">
+                        <label for="max-loops">Max Research Loops:</label>
+                        <input type="number" id="max-loops" value="3" min="1" max="10">
+                    </div>
+                    <button onclick="updateConfig()">Update Configuration</button>
+                </div>
             </div>
-            <div id="status"></div>
-            <div id="result"></div>
         </div>
 
         <script>
         let currentStep = 0;
+        let stepStartTime = Date.now();
         const steps = ['query', 'research', 'summary', 'reflection', 'final'];
+        let statusSource = null;
+
+        function formatTime(seconds) {
+            return `${seconds.toFixed(1)}s`;
+        }
 
         function updateStep(stepName, status) {
+            const now = Date.now();
+            const elapsed = (now - stepStartTime) / 1000;
+            
             steps.forEach((step, index) => {
                 const el = document.getElementById(`step-${step}`);
                 el.className = 'step';
                 if (step === stepName) {
                     el.className = 'step active';
                     currentStep = index;
+                    document.getElementById(`timer-${step}`).textContent = formatTime(elapsed);
                 } else if (index < currentStep) {
                     el.className = 'step completed';
                 }
             });
             
-            const statusEl = document.getElementById('status');
-            statusEl.textContent = status;
+            const trace = document.getElementById('thinking-trace');
+            trace.innerHTML += `<div>${status}</div>`;
+            trace.scrollTop = trace.scrollHeight;
+        }
+
+        async function updateConfig() {
+            const llm = document.getElementById('local-llm').value;
+            const loops = parseInt(document.getElementById('max-loops').value);
+            
+            try {
+                await fetch('/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        local_llm: llm,
+                        max_web_research_loops: loops
+                    }),
+                });
+            } catch (error) {
+                console.error('Failed to update config:', error);
+            }
+        }
+
+        function connectToStatusStream() {
+            if (statusSource) {
+                statusSource.close();
+            }
+            
+            statusSource = new EventSource('/status');
+            statusSource.onmessage = (event) => {
+                const status = JSON.parse(event.data);
+                updateStep(status.phase, status.message);
+            };
         }
 
         async function submitResearch() {
             const topic = document.getElementById('topic').value;
             const result = document.getElementById('result');
-            const status = document.getElementById('status');
             
             result.style.display = 'block';
             result.textContent = 'Starting research...';
             currentStep = 0;
+            stepStartTime = Date.now();
+            
+            document.getElementById('thinking-trace').innerHTML = '';
+            connectToStatusStream();
             
             try {
-                updateStep('query', 'Generating search query...');
                 const response = await fetch('/research', {
                     method: 'POST',
                     headers: {
@@ -194,11 +371,18 @@ async fn serve_index() -> Html<&'static str> {
                 const data = await response.json();
                 result.textContent = data.summary;
                 updateStep('final', data.status);
+                
+                if (statusSource) {
+                    statusSource.close();
+                }
             } catch (error) {
                 result.textContent = `Error: ${error.message}`;
                 updateStep('final', 'Error occurred');
             }
         }
+
+        // Initialize status stream
+        connectToStatusStream();
         </script>
     </body>
     </html>
@@ -213,7 +397,8 @@ async fn handle_research(
         research_topic: request.topic,
     };
 
-    match state.graph.run(input).await {
+    let graph = state.graph.lock().await;
+    match graph.run(input).await {
         Ok(output) => (
             StatusCode::OK,
             Json(ResearchResponse { 
@@ -232,4 +417,58 @@ async fn handle_research(
             ).into_response()
         },
     }
+}
+
+async fn status_stream(
+    State(state): State<Arc<AppState>>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let mut rx = state.status_tx.subscribe();
+    
+    let stream = async_stream::stream! {
+        while let Ok(status) = rx.recv().await {
+            yield Ok(Event::default().data(serde_json::to_string(&status).unwrap()));
+        }
+    };
+
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(1))
+            .text("keep-alive-text")
+    )
+}
+
+async fn update_config(
+    State(state): State<Arc<AppState>>,
+    Json(update): Json<ConfigUpdate>,
+) -> impl IntoResponse {
+    let mut graph = state.graph.lock().await;
+    
+    // Send status updates
+    let _ = state.status_tx.send(StatusUpdate {
+        phase: "config".to_string(),
+        message: "Updating configuration...".to_string(),
+        elapsed_time: 0.0,
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs(),
+    });
+
+    if let Some(llm) = update.local_llm {
+        println!("Updating LLM to: {}", llm);
+        graph.update_llm(llm);
+    }
+    
+    if let Some(loops) = update.max_web_research_loops {
+        println!("Updating max loops to: {}", loops);
+        graph.update_max_loops(loops);
+    }
+    
+    (
+        StatusCode::OK,
+        Json(json!({
+            "status": "Configuration updated",
+            "message": "Changes will take effect on next research request"
+        }))
+    )
 } 
