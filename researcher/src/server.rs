@@ -11,6 +11,7 @@ use std::{
     net::SocketAddr,
     convert::Infallible,
     time::{Duration, SystemTime, UNIX_EPOCH},
+    env,
 };
 use crate::assistant::{
     configuration::Configuration,
@@ -96,8 +97,9 @@ pub async fn run_server(config: Configuration) {
         .layer(CorsLayer::permissive())
         .with_state(state);
 
-    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    println!("Starting server on http://localhost:3000");
+    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string()).parse::<u16>().unwrap_or(3000);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    println!("Starting server on http://localhost:{}", port);
     
     axum::serve(
         tokio::net::TcpListener::bind(&addr).await.unwrap(),
