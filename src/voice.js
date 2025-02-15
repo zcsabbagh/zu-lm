@@ -13,7 +13,7 @@ const VOICE_IDS = {
   SPEAKER_2: "ZF6FPAbjXT4488VcRRnw"
 };
 
-async function textToSpeech(voiceId = VOICE_IDS.SPEAKER_1, 
+async function textToSpeech(voiceId = "JBFqnCBsd6RMkjVDRZzb", 
   text = "The first move is what sets everything in motion.") {
   try {
     const audio = await client.textToSpeech.convert(voiceId, {
