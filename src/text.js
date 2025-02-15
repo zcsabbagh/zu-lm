@@ -1,86 +1,138 @@
-import { generateText } from "ai"
+import { generateText, generateObject } from "ai"
 import { groq } from "@ai-sdk/groq";
 import { openai } from "@ai-sdk/openai";
 import dotenv from "dotenv";
-import { generateObject } from 'ai';
-import { createOpenAI as createGroq } from '@ai-sdk/openai';
-// import { playPodcastTranscript } from "./voice-helpers.js";
+import { Schemas } from './schemas.js';
 
 dotenv.config();
 
-import { z } from 'zod';
-
-// const groq = createGroq({
-//   baseURL: 'https://api.groq.com/openai/v1',
-//   apiKey: process.env.GROQ_API_KEY,
-// });
-
-
-
-const { object } = await generateObject({
-  model: groq('llama-3.1-70b-versatile'),
-  schema: z.object({
-    recipe: z.object({
-      name: z.string(),
-      ingredients: z.array(z.object({ name: z.string(), amount: z.string() })),
-      steps: z.array(z.string()),
-    }),
-  }),
-  prompt: 'Generate a lasagna recipe.',
-});
-
-const GROQ_MODELS = [
-    "deepseek-r1-distill-llama-70b",
-    "llama-3.3-70b-versatile",
-    "llama-3.1-8b-instant",
-    "gemma2-9b-it",
-    "mixtral-8x7b-32768"
-]
+const MODELS = {
+  groq: {
+    default: "deepseek-r1-distill-llama-70b",
+    available: [
+      "deepseek-r1-distill-llama-70b",
+      "llama2-70b-4096",
+      "mixtral-8x7b-32768",
+      "llama-3.3-70b-versatile",
+      "llama-3.1-8b-instant",
+      "gemma2-9b-it"
+    ]
+  },
+  openai: {
+    default: "gpt-3.5-turbo",
+    available: [
+      "gpt-4",
+      "gpt-3.5-turbo",
+      "gpt-4-turbo-preview"
+    ]
+  }
+};
 
 async function createText(
   provider = "groq", 
   prompt = "What is love?", 
-  model = "deepseek-r1-distill-llama-70b",
-  stream = true
+  model = null,
+  stream = false
 ) {
   try {
-    if (provider === "groq") {
+    const client = provider === "groq" ? groq : openai;
+    const selectedModel = model || MODELS[provider].default;
 
-       if (stream) {
-        const { textStream } = streamText({
-            model: groq(model),
-            prompt: prompt,
-            stream: stream
-        })
-        return textStream;
-       } else {
-        const { text } = await generateText({
-            model: groq(model),
-            prompt: prompt,
-            stream: stream
-        })
-        return text;
-       }
-
-    } else if (provider === "openai")    {
-        const { text } = await generateText({
-            model: openai(model),
-            prompt: prompt,
-            stream: stream
-        })
-        return text;
+    if (!MODELS[provider].available.includes(selectedModel)) {
+      throw new Error(`Invalid model for ${provider}. Available models: ${MODELS[provider].available.join(", ")}`);
     }
 
+    const { text } = await generateText({
+      model: client(selectedModel),
+      prompt: prompt,
+      stream: stream
+    });
+    return text;
   } catch (error) {
-    console.error('Error generating with Groq:', error);
+    console.error(`Error generating with ${provider}:`, error);
     throw error;
   }
 }
 
-createText("groq", "What is love?", "deepseek-r1-distill-llama-70b", true)
-  .then(response => console.log(response))
-  .catch(error => console.error(error));
+async function createObject(
+  schemaName,
+  customPrompt = null,
+  provider = "groq",
+  model = null,
+) {
+  try {
+    const schema = Schemas[schemaName];
+    if (!schema) {
+      throw new Error(`Schema "${schemaName}" not found. Available schemas: ${Object.keys(Schemas).join(", ")}`);
+    }
 
-// createText("openai", "What is love?", "gpt-4o")
-//   .then(response => console.log(response))
-//   .catch(error => console.error(error));
+    const client = provider === "groq" ? groq : openai;
+    const selectedModel = model || MODELS[provider].default;
+
+    if (!MODELS[provider].available.includes(selectedModel)) {
+      throw new Error(`Invalid model for ${provider}. Available models: ${MODELS[provider].available.join(", ")}`);
+    }
+
+    // For podcast transcripts, we'll handle the response differently
+    if (schemaName === 'podcast') {
+      const { text } = await generateText({
+        model: client(selectedModel),
+        prompt: customPrompt,
+        stream: false
+      });
+
+      // Log the raw response for debugging
+      console.log('Raw model response:', text);
+
+      // Parse the text response into our expected format
+      try {
+        // Split the text into segments and parse each one
+        const segments = text.split(/\n\s*\n/).filter(Boolean);
+        
+        console.log('Segments:', segments); // Debug log
+
+        const transcript = segments.map(segment => {
+          // More flexible pattern matching for different quote styles and whitespace
+          const speakerMatch = segment.match(/["']?speaker["']?\s*:\s*["'](Speaker \d)["']/i);
+          const textMatch = segment.match(/["']?text["']?\s*:\s*["']([^"']+)["']/);
+          
+          console.log('Processing segment:', segment); // Debug log
+          console.log('Speaker match:', speakerMatch); // Debug log
+          console.log('Text match:', textMatch); // Debug log
+
+          if (!speakerMatch || !textMatch) {
+            console.log('Failed to parse segment:', segment);
+            throw new Error(`Invalid segment format: ${segment}`);
+          }
+
+          return {
+            speaker: speakerMatch[1],
+            text: textMatch[1].replace(/\\n/g, ' ').trim()
+          };
+        });
+
+        // Validate against our schema
+        const parsed = schema.parse(transcript);
+        return parsed;
+      } catch (parseError) {
+        console.error('Error parsing response:', parseError);
+        console.error('Parse error details:', parseError.message);
+        throw new Error('Failed to parse model response into valid transcript format');
+      }
+    }
+
+    // For other schema types, use generateObject as before
+    const { data } = await generateObject({
+      model: client(selectedModel),
+      prompt: customPrompt,
+      schema,
+    });
+
+    return data;
+  } catch (error) {
+    console.error(`Error generating object with ${provider}:`, error);
+    throw error;
+  }
+}
+
+export { createText, createObject, MODELS };
