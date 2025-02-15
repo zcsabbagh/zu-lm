@@ -197,7 +197,7 @@ impl Node for FinalizerNode {
 
 pub struct ResearchGraph {
     state: Arc<Mutex<SummaryState>>,
-    config: Configuration,
+    pub(crate) config: Configuration,
 }
 
 impl ResearchGraph {
@@ -206,6 +206,20 @@ impl ResearchGraph {
             state: Arc::new(Mutex::new(SummaryState::new())),
             config,
         }
+    }
+    
+    pub fn update_llm(&mut self, new_llm: String) {
+        self.config = Configuration {
+            local_llm: new_llm,
+            ..self.config.clone()
+        };
+    }
+
+    pub fn update_max_loops(&mut self, new_max: i32) {
+        self.config = Configuration {
+            max_web_research_loops: new_max,
+            ..self.config.clone()
+        };
     }
     
     pub async fn run(&self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
