@@ -34,6 +34,8 @@ export default function Home() {
   const [audioSegments, setAudioSegments] = useState<ArrayBuffer[]>([]);
   const [currentSegment, setCurrentSegment] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
+  const [transcript, setTranscript] = useState<Array<{ speaker: string; text: string }>>([]);
+  const [displayedMessages, setDisplayedMessages] = useState<Array<{ role: string; content: string }>>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const { messages, setMessages } = useChat();
 
@@ -42,35 +44,47 @@ export default function Home() {
     const summary = localStorage.getItem('researchSummary');
     if (summary) {
       setResearchSummary(summary);
-      localStorage.removeItem('researchSummary'); // Clear it after reading
+      localStorage.removeItem('researchSummary');
     }
   }, []);
 
   useEffect(() => {
-    // Handle audio playback
-    if (audioSegments.length > 0 && currentSegment < audioSegments.length && isPlaying) {
+    // Handle audio playback and transcript synchronization
+    if (audioSegments.length > 0 && currentSegment < audioSegments.length) {
       const audio = audioRef.current;
       if (audio) {
         const blob = new Blob([audioSegments[currentSegment]], { type: 'audio/mpeg' });
         const url = URL.createObjectURL(blob);
         audio.src = url;
-        audio.play();
         
+        // Start playing automatically
+        audio.play().catch(error => {
+          console.error('Error playing audio:', error);
+        });
+        
+        // Display the current segment's transcript
+        setDisplayedMessages(prev => [
+          ...prev,
+          {
+            role: 'assistant',
+            content: `${transcript[currentSegment].speaker}: ${transcript[currentSegment].text}`,
+          }
+        ]);
+
         audio.onended = () => {
           URL.revokeObjectURL(url);
           if (currentSegment < audioSegments.length - 1) {
             setCurrentSegment(prev => prev + 1);
-          } else {
-            setIsPlaying(false);
-            setCurrentSegment(0);
           }
         };
       }
     }
-  }, [audioSegments, currentSegment, isPlaying]);
+  }, [audioSegments, currentSegment, transcript]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setDisplayedMessages([]); // Clear previous messages
+    setCurrentSegment(0); // Reset segment counter
     try {
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -94,36 +108,28 @@ export default function Home() {
       }
 
       // Convert base64 audio segments to ArrayBuffer
-      const segments = data.audioSegments.map((segment: string) => {
-        const binaryString = atob(segment);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
+      const segments = data.audioSegments.map((base64Audio: string) => {
+        try {
+          const binaryString = atob(base64Audio);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          return bytes.buffer;
+        } catch (error) {
+          console.error('Error decoding audio segment:', error);
+          throw new Error('Failed to decode audio data');
         }
-        return bytes.buffer;
       });
 
       setAudioSegments(segments);
-      setMessages(data.transcript.map((segment: any) => ({
-        role: 'assistant',
-        content: `${segment.speaker}: ${segment.text}`,
-      })));
-
-      // Clear the research summary after using it
+      setTranscript(data.transcript);
       setResearchSummary(null);
     } catch (error) {
       console.error('Generation error:', error);
+      alert(error instanceof Error ? error.message : 'Failed to generate podcast');
     } finally {
       setIsGenerating(false);
-    }
-  };
-
-  const handlePlayPause = () => {
-    if (isPlaying) {
-      audioRef.current?.pause();
-      setIsPlaying(false);
-    } else {
-      setIsPlaying(true);
     }
   };
 
@@ -189,21 +195,11 @@ export default function Home() {
         {isGenerating ? 'Generating...' : 'Generate Podcast'}
       </button>
 
-      {audioSegments.length > 0 && (
-        <div className="mt-6">
-          <audio ref={audioRef} className="hidden" />
-          <button
-            onClick={handlePlayPause}
-            className="w-full bg-green-500 text-white px-4 py-2 rounded-md"
-          >
-            {isPlaying ? 'Pause' : 'Play'}
-          </button>
-        </div>
-      )}
+      <audio ref={audioRef} className="hidden" />
 
-      {messages.length > 0 && (
+      {displayedMessages.length > 0 && (
         <div className="mt-6">
-          <Chat messages={messages} />
+          <Chat messages={displayedMessages} />
         </div>
       )}
     </div>

@@ -13,33 +13,33 @@ export const Schemas = {
   podcast: PodcastTranscriptSchema,
 } as const;
 
-export function verifyPodcast(report: string, transcript: string, language = "English", minutes = "3") {
-  return `
-  You are given a podcast that should be in format: \n
-  {
-    "speaker": "Speaker 1",
-    "text": "Your text here in ${language}"
-  } \n
-  Where each bit of text is a complete sentence.
+// export function verifyPodcast(report: string, transcript: string, language = "English", minutes = "3") {
+//   return `
+//   You are given a podcast that should be in format: \n
+//   {
+//     "speaker": "Speaker 1",
+//     "text": "Your text here in ${language}"
+//   } \n
+//   Where each bit of text is a complete sentence.
 
-  This podcast has been generated about the following report: \n
-  ${report} \n
+//   This podcast has been generated about the following report: \n
+//   ${report} \n
 
-  The podcast is ${minutes} minutes long.
+//   The podcast is ${minutes} minutes long.
 
-  The podcast is in ${language}.
+//   The podcast is in ${language}.
 
-  Your job is to verify that the podcast is in the correct format and that each bit of text is a complete sentence.
-  If it is not, you should correct it.
+//   Your job is to verify that the podcast is in the correct format and that each bit of text is a complete sentence.
+//   If it is not, you should correct it.
 
-  You should return the corrected podcast in the same format as the original podcast.
+//   You should return the corrected podcast in the same format as the original podcast.
 
-  Here is the podcast: \n
-  ${transcript} \n
+//   Here is the podcast: \n
+//   ${transcript} \n
 
-  Here is the corrected podcast: \n
-  `
-}
+//   Here is the corrected podcast: \n
+//   `
+// }
 
 // Create a function to generate the prompt with the report
 export function getPodcastPrompt(report: string, language = "English", minutes = "5") {
