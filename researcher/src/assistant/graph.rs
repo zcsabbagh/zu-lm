@@ -8,6 +8,7 @@ use ollama_rs::generation::completion::request::GenerationRequest;
 use tokio::sync::broadcast::Sender;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
+use std::time::Duration;
 
 use super::configuration::Configuration;
 use super::prompts::{
@@ -199,18 +200,32 @@ impl Node for FinalizerNode {
 }
 
 pub struct ResearchGraph {
-    state: Arc<Mutex<SummaryState>>,
-    pub(crate) config: Configuration,
+    config: Configuration,
     status_tx: Option<Sender<StatusUpdate>>,
+    nodes: Vec<Box<dyn Node>>,
 }
 
 impl ResearchGraph {
     pub fn new(config: Configuration) -> Self {
         Self {
-            state: Arc::new(Mutex::new(SummaryState::new())),
             config,
             status_tx: None,
+            nodes: vec![
+                Box::new(QueryGeneratorNode),
+                Box::new(WebResearchNode),
+                Box::new(SummarizerNode),
+                Box::new(ReflectionNode),
+                Box::new(FinalizerNode),
+            ],
         }
+    }
+    
+    pub fn get_llm_model(&self) -> &str {
+        &self.config.local_llm
+    }
+
+    pub fn get_max_loops(&self) -> i32 {
+        self.config.max_web_research_loops
     }
     
     pub fn update_llm(&mut self, new_llm: String) {
@@ -231,94 +246,74 @@ impl ResearchGraph {
         self.status_tx = Some(tx);
     }
 
-    fn send_status(&self, phase: &str, message: &str, start_time: Option<SystemTime>) {
+    fn send_status(&self, phase: &str, message: &str) {
         if let Some(tx) = &self.status_tx {
-            let elapsed = start_time.map(|t| {
-                t.elapsed()
-                    .unwrap_or_default()
-                    .as_secs_f64()
-            }).unwrap_or_default();
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
 
-            let _ = tx.send(StatusUpdate {
+            let status = StatusUpdate {
                 phase: phase.to_string(),
                 message: message.to_string(),
-                elapsed_time: elapsed,
-                timestamp: SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs(),
-            });
+                elapsed_time: 0.0,
+                timestamp: now,
+            };
+
+            match tx.send(status) {
+                Ok(_) => println!("Sent status update: phase={}, message={}", phase, message),
+                Err(e) => {
+                    eprintln!("Failed to send status update: {} (phase={}, message={})", e, phase, message);
+                    // Don't fail the research process if status updates fail
+                }
+            }
+        } else {
+            eprintln!("No status sender available for update: phase={}, message={}", phase, message);
         }
     }
     
-    pub async fn run(&self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
-        {
-            let mut state = self.state.lock().await;
-            state.research_topic = input.research_topic;
-            state.research_loop_count = 0;
+    pub async fn process_research(&mut self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
+        let state = Arc::new(Mutex::new(SummaryState::with_research_topic(
+            input.research_topic.clone(),
+        )));
+
+        for (i, node) in self.nodes.iter().enumerate() {
+            let phase = match i {
+                0 => "query",
+                1 => "research",
+                2 => "summary",
+                3 => "reflection",
+                4 => "final",
+                _ => "unknown",
+            };
+
+            // Send start phase status
+            self.send_status(phase, &format!("Starting {} phase...", phase));
+            
+            match node.process(state.clone(), &self.config).await {
+                Ok(_) => {
+                    // Send completion status
+                    self.send_status(phase, &format!("Completed {} phase", phase));
+                }
+                Err(e) => {
+                    let error_msg = format!("Error in {} phase: {}", phase, e);
+                    self.send_status("error", &error_msg);
+                    return Err(anyhow::anyhow!(error_msg));
+                }
+            }
+
+            // Small delay between phases to ensure status updates are received in order
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
+
+        let final_state = state.lock().await;
+        let summary = final_state.running_summary.clone().unwrap_or_default();
         
-        println!("Starting initial research loop...");
-        let nodes = vec![
-            Box::new(QueryGeneratorNode) as Box<dyn Node>,
-            Box::new(WebResearchNode) as Box<dyn Node>,
-            Box::new(SummarizerNode) as Box<dyn Node>,
-        ];
+        // Send final status update with summary
+        self.send_status("complete", &format!("Research completed. Summary length: {} chars", summary.len()));
         
-        // Initial research loop with timing
-        let start_time = SystemTime::now();
-        self.send_status("query", "Generating initial search query...", None);
-        nodes[0].process(self.state.clone(), &self.config).await?;
-        self.send_status("query", "Search query generated", Some(start_time));
-        
-        let start_time = SystemTime::now();
-        self.send_status("research", "Performing web research...", None);
-        nodes[1].process(self.state.clone(), &self.config).await?;
-        self.send_status("research", "Web research completed", Some(start_time));
-        
-        let start_time = SystemTime::now();
-        self.send_status("summary", "Summarizing research results...", None);
-        nodes[2].process(self.state.clone(), &self.config).await?;
-        self.send_status("summary", "Summary completed", Some(start_time));
-        
-        // Additional research loops
-        while {
-            let state = self.state.lock().await;
-            state.research_loop_count < self.config.max_web_research_loops
-        } {
-            let start_time = SystemTime::now();
-            self.send_status("reflection", "Analyzing results and identifying knowledge gaps...", None);
-            println!("Starting reflection phase...");
-            let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
-            reflection_node.process(self.state.clone(), &self.config).await?;
-            self.send_status("reflection", "Knowledge gaps identified", Some(start_time));
-            
-            let start_time = SystemTime::now();
-            self.send_status("query", "Generating follow-up query...", None);
-            nodes[0].process(self.state.clone(), &self.config).await?;
-            self.send_status("query", "Follow-up query generated", Some(start_time));
-            
-            let start_time = SystemTime::now();
-            self.send_status("research", "Performing additional web research...", None);
-            nodes[1].process(self.state.clone(), &self.config).await?;
-            self.send_status("research", "Additional research completed", Some(start_time));
-            
-            let start_time = SystemTime::now();
-            self.send_status("summary", "Updating research summary...", None);
-            nodes[2].process(self.state.clone(), &self.config).await?;
-            self.send_status("summary", "Summary updated", Some(start_time));
-        }
-        
-        let start_time = SystemTime::now();
-        self.send_status("final", "Finalizing research results...", None);
-        println!("Finalizing research...");
-        let finalizer = Box::new(FinalizerNode) as Box<dyn Node>;
-        finalizer.process(self.state.clone(), &self.config).await?;
-        self.send_status("final", "Research completed", Some(start_time));
-        
-        let state = self.state.lock().await;
         Ok(SummaryStateOutput {
-            running_summary: state.running_summary.clone().unwrap_or_default(),
+            running_summary: summary,
         })
     }
 } 
