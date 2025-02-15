@@ -226,6 +226,7 @@ impl ResearchGraph {
         {
             let mut state = self.state.lock().await;
             state.research_topic = input.research_topic;
+            state.research_loop_count = 0;  // Reset loop count at start
         }
         
         println!("Starting initial research loop...");
@@ -243,7 +244,7 @@ impl ResearchGraph {
         // Additional research loops
         while {
             let state = self.state.lock().await;
-            state.research_loop_count <= self.config.max_web_research_loops
+            state.research_loop_count < self.config.max_web_research_loops  // Changed <= to <
         } {
             println!("Starting reflection phase...");
             let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
