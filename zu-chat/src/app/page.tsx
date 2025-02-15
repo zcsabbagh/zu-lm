@@ -7,6 +7,11 @@ import { useChat } from 'ai/react';
 const LANGUAGES = [
   { value: "English", label: "English" },
   { value: "Spanish", label: "Spanish" },
+  { value: "Chinese", label: "Chinese" },
+  { value: "Russian", label: "Russian" },
+  { value: "Arabic", label: "Arabic" },
+  { value: "Japanese", label: "Japanese" },
+  { value: "Korean", label: "Korean" },
   { value: "French", label: "French" },
   { value: "German", label: "German" },
   { value: "Italian", label: "Italian" },
