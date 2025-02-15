@@ -5,6 +5,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use ollama_rs::Ollama;
 use ollama_rs::generation::completion::request::GenerationRequest;
+use tokio::sync::broadcast::Sender;
+use std::time::SystemTime;
+use std::time::UNIX_EPOCH;
 
 use super::configuration::Configuration;
 use super::prompts::{
@@ -12,7 +15,7 @@ use super::prompts::{
     format_reflection_instructions,
     SUMMARIZER_INSTRUCTIONS,
 };
-use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput};
+use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput, StatusUpdate};
 use super::utils::{perplexity_search, format_sources};
 
 #[async_trait]
@@ -198,6 +201,7 @@ impl Node for FinalizerNode {
 pub struct ResearchGraph {
     state: Arc<Mutex<SummaryState>>,
     pub(crate) config: Configuration,
+    status_tx: Option<Sender<StatusUpdate>>,
 }
 
 impl ResearchGraph {
@@ -205,6 +209,7 @@ impl ResearchGraph {
         Self {
             state: Arc::new(Mutex::new(SummaryState::new())),
             config,
+            status_tx: None,
         }
     }
     
@@ -222,11 +227,29 @@ impl ResearchGraph {
         };
     }
     
+    pub fn set_status_sender(&mut self, tx: Sender<StatusUpdate>) {
+        self.status_tx = Some(tx);
+    }
+
+    fn send_status(&self, phase: &str, message: &str) {
+        if let Some(tx) = &self.status_tx {
+            let _ = tx.send(StatusUpdate {
+                phase: phase.to_string(),
+                message: message.to_string(),
+                elapsed_time: 0.0,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+            });
+        }
+    }
+    
     pub async fn run(&self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
         {
             let mut state = self.state.lock().await;
             state.research_topic = input.research_topic;
-            state.research_loop_count = 0;  // Reset loop count at start
+            state.research_loop_count = 0;
         }
         
         println!("Starting initial research loop...");
@@ -237,25 +260,39 @@ impl ResearchGraph {
         ];
         
         // Initial research loop
-        for node in &nodes {
-            node.process(self.state.clone(), &self.config).await?;
-        }
+        self.send_status("query", "Generating initial search query...");
+        nodes[0].process(self.state.clone(), &self.config).await?;
+        
+        self.send_status("research", "Performing web research...");
+        nodes[1].process(self.state.clone(), &self.config).await?;
+        
+        self.send_status("summary", "Summarizing research results...");
+        nodes[2].process(self.state.clone(), &self.config).await?;
         
         // Additional research loops
         while {
             let state = self.state.lock().await;
-            state.research_loop_count < self.config.max_web_research_loops  // Changed <= to <
+            state.research_loop_count < self.config.max_web_research_loops
         } {
+            self.send_status("reflection", "Analyzing results and identifying knowledge gaps...");
             println!("Starting reflection phase...");
             let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
             reflection_node.process(self.state.clone(), &self.config).await?;
             
+            self.send_status("reflection", "Starting follow-up research...");
             println!("Starting follow-up research...");
-            for node in &nodes {
-                node.process(self.state.clone(), &self.config).await?;
-            }
+            
+            self.send_status("query", "Generating follow-up query...");
+            nodes[0].process(self.state.clone(), &self.config).await?;
+            
+            self.send_status("research", "Performing additional web research...");
+            nodes[1].process(self.state.clone(), &self.config).await?;
+            
+            self.send_status("summary", "Updating research summary...");
+            nodes[2].process(self.state.clone(), &self.config).await?;
         }
         
+        self.send_status("final", "Finalizing research results...");
         println!("Finalizing research...");
         let finalizer = Box::new(FinalizerNode) as Box<dyn Node>;
         finalizer.process(self.state.clone(), &self.config).await?;

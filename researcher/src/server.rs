@@ -14,7 +14,7 @@ use std::{
 };
 use crate::assistant::{
     configuration::Configuration,
-    state::SummaryStateInput,
+    state::{SummaryStateInput, StatusUpdate},
     graph::ResearchGraph,
 };
 use tower_http::cors::CorsLayer;
@@ -23,14 +23,6 @@ use tokio::sync::broadcast;
 use serde_json::json;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-
-#[derive(Clone, serde::Serialize)]
-struct StatusUpdate {
-    phase: String,
-    message: String,
-    elapsed_time: f64,
-    timestamp: u64,
-}
 
 #[derive(Deserialize)]
 struct ConfigUpdate {
@@ -78,9 +70,13 @@ impl From<anyhow::Error> for ApiError {
 
 pub async fn run_server(config: Configuration) {
     let (status_tx, _) = broadcast::channel(100);
+    let status_tx_clone = status_tx.clone();
+
+    let mut graph = ResearchGraph::new(config);
+    graph.set_status_sender(status_tx_clone);
 
     let state = Arc::new(AppState {
-        graph: Arc::new(Mutex::new(ResearchGraph::new(config))),
+        graph: Arc::new(Mutex::new(graph)),
         status_tx,
     });
 
