@@ -1,0 +1,1 @@
+cargo:rustc-env=MIME_TYPES_GENERATED_PATH=/Users/uochuba/Documents/GitHub/zu-lm/target/debug/build/mime_guess-1dd88575a0a5ca22/out/mime_types_generated.rs
