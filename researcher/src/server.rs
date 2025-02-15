@@ -152,6 +152,7 @@ async fn handle_research(
         message: format!("Starting research on topic: {}", input.research_topic),
         elapsed_time: 0.0,
         timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+        chain_of_thought: None,
     }) {
         eprintln!("Failed to send initial status update: {}", e);
     }
@@ -168,6 +169,7 @@ async fn handle_research(
                 message: output.running_summary.clone(),
                 elapsed_time: 0.0,
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                chain_of_thought: None,
             });
             
             (
@@ -185,6 +187,7 @@ async fn handle_research(
                 message: format!("Error: {}", e),
                 elapsed_time: 0.0,
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
+                chain_of_thought: None,
             });
             
             (
@@ -261,6 +264,7 @@ async fn update_config(
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs(),
+        chain_of_thought: None,
     });
 
     if let Some(llm) = update.local_llm {

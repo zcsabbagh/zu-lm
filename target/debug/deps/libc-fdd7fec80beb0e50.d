@@ -1,0 +1,12 @@
+/Users/zane/zu-lm/target/debug/deps/liblibc-fdd7fec80beb0e50.rmeta: /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/lib.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/macros.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/fixed_width_ints.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/aarch64/mod.rs
+
+/Users/zane/zu-lm/target/debug/deps/libc-fdd7fec80beb0e50.d: /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/lib.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/macros.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/fixed_width_ints.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/mod.rs /Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/aarch64/mod.rs
+
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/lib.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/macros.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/fixed_width_ints.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/mod.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/mod.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/mod.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/mod.rs:
+/Users/zane/.cargo/registry/src/index.crates.io-6f17d22bba15001f/libc-0.2.169/src/unix/bsd/apple/b64/aarch64/mod.rs:
