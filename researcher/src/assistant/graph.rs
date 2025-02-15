@@ -6,14 +6,14 @@ use tokio::sync::Mutex;
 use ollama_rs::Ollama;
 use ollama_rs::generation::completion::request::GenerationRequest;
 
-use super::configuration::{Configuration, SearchAPI};
+use super::configuration::Configuration;
 use super::prompts::{
     format_query_writer_instructions,
     format_reflection_instructions,
     SUMMARIZER_INSTRUCTIONS,
 };
 use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput};
-use super::utils::{perplexity_search, tavily_search, format_sources};
+use super::utils::{perplexity_search, format_sources};
 
 #[async_trait]
 pub trait Node: Send + Sync {
@@ -65,7 +65,7 @@ impl Node for QueryGeneratorNode {
 
 #[async_trait]
 impl Node for WebResearchNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<()> {
         let (query, loop_count) = {
             let state = state.lock().await;
             (
@@ -74,10 +74,7 @@ impl Node for WebResearchNode {
             )
         };
         
-        let search_results = match config.search_api {
-            SearchAPI::Tavily => tavily_search(&query, true, 1).await?,
-            SearchAPI::Perplexity => perplexity_search(&query, loop_count).await?,
-        };
+        let search_results = perplexity_search(&query, loop_count).await?;
         
         let search_str = format_sources(&search_results);
         let mut state = state.lock().await;
@@ -217,6 +214,7 @@ impl ResearchGraph {
             state.research_topic = input.research_topic;
         }
         
+        println!("Starting initial research loop...");
         let nodes = vec![
             Box::new(QueryGeneratorNode) as Box<dyn Node>,
             Box::new(WebResearchNode) as Box<dyn Node>,
@@ -233,15 +231,17 @@ impl ResearchGraph {
             let state = self.state.lock().await;
             state.research_loop_count <= self.config.max_web_research_loops
         } {
+            println!("Starting reflection phase...");
             let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
             reflection_node.process(self.state.clone(), &self.config).await?;
             
+            println!("Starting follow-up research...");
             for node in &nodes {
                 node.process(self.state.clone(), &self.config).await?;
             }
         }
         
-        // Finalize
+        println!("Finalizing research...");
         let finalizer = Box::new(FinalizerNode) as Box<dyn Node>;
         finalizer.process(self.state.clone(), &self.config).await?;
         

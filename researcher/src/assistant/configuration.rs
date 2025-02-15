@@ -7,13 +7,11 @@ use anyhow::Result;
 pub enum SearchAPI {
     #[serde(rename = "perplexity")]
     Perplexity,
-    #[serde(rename = "tavily")]
-    Tavily,
 }
 
 impl Default for SearchAPI {
     fn default() -> Self {
-        SearchAPI::Tavily
+        SearchAPI::Perplexity
     }
 }
 
@@ -33,7 +31,7 @@ fn default_max_web_research_loops() -> i32 {
 }
 
 fn default_local_llm() -> String {
-    "llama3.2".to_string()
+    "deepseek-r1:8b".to_string()
 }
 
 impl Configuration {
@@ -44,35 +42,39 @@ impl Configuration {
         println!("Current directory: {:?}", std::env::current_dir()?);
         println!("Checking environment variables...");
         
-        for (key, value) in env::vars() {
-            if key.starts_with("PERPLEXITY") || key.starts_with("LOCAL") || key.starts_with("MAX") || key.starts_with("SEARCH") {
-                println!("Found env var {}: {}", key, if key.contains("KEY") { 
-                    "***".to_string() 
-                } else { 
-                    value.clone() 
-                });
+        // Check and print all relevant environment variables
+        let env_vars = [
+            "PERPLEXITY_API_KEY",
+            "LOCAL_LLM",
+            "MAX_WEB_RESEARCH_LOOPS",
+            "SEARCH_API",
+        ];
+
+        for var in env_vars.iter() {
+            match env::var(var) {
+                Ok(value) => println!("Found env var {}: {}", var, 
+                    if var.contains("KEY") { "***".to_string() } else { value.clone() }
+                ),
+                Err(_) => println!("Warning: {} not found", var),
             }
         }
 
-        // Since we're not using the configurable map anymore, we can remove it
-        let _unused = config;  // Explicitly mark config as unused
+        let _unused = config;
 
-        // Check each required environment variable
+        // Check each required environment variable with specific error messages
         let perplexity_api_key = env::var("PERPLEXITY_API_KEY")
-            .map_err(|_| anyhow::anyhow!("PERPLEXITY_API_KEY environment variable not found"))?;
+            .map_err(|_| anyhow::anyhow!("PERPLEXITY_API_KEY environment variable not found - please add this to your .env file"))?;
 
         let local_llm = env::var("LOCAL_LLM")
-            .map_err(|_| anyhow::anyhow!("LOCAL_LLM environment variable not found"))?;
+            .map_err(|_| anyhow::anyhow!("LOCAL_LLM environment variable not found - please add this to your .env file"))?;
 
         let max_web_research_loops = env::var("MAX_WEB_RESEARCH_LOOPS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or_else(default_max_web_research_loops);
 
-        let search_api = env::var("SEARCH_API")
-            .ok()
-            .and_then(|v| serde_json::from_str(&v).ok())
-            .unwrap_or_default();
+        // Always use Perplexity as the search API
+        let search_api = SearchAPI::Perplexity;
 
         Ok(Configuration {
             max_web_research_loops,

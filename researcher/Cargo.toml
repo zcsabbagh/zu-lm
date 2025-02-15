@@ -22,4 +22,4 @@ url = "2.5"
 enum-as-inner = "0.6"
 ollama-rs = "0.1"  # For Ollama integration
 axum = { version = "0.7", features = ["json", "macros"] }
-tower-http = { version = "0.5", features = ["cors"] } 
+tower-http = { version = "0.5", features = ["cors", "fs"] } 
