@@ -565,7 +565,7 @@ async fn status_stream(
                     yield Ok(Event::default()
                         .data(json)
                         .id(status.timestamp.to_string()) // Add message ID for retry
-                        .retry(RETRY_DELAY.as_millis() as u32)); // Set retry interval
+                        .retry(Duration::from_millis(RETRY_DELAY.as_millis() as u64))); // Convert to Duration
                 }
                 Err(e) => {
                     eprintln!("Error receiving status update: {}", e);
