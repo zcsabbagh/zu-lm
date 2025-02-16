@@ -2,6 +2,14 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
+[Install ollama](https://ollama.com/download)
+
+Install a model
+
+```bash
+ollama run deepseek-r1:8b
+```
+
 First, run the development server:
 
 ```bash

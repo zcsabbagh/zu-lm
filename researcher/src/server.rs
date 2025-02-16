@@ -2,9 +2,9 @@ use axum::{
     routing::{post, get, put},
     Router,
     Json,
-    extract::State,
+    extract::{State, Path},
     http::StatusCode,
-    response::{IntoResponse, Response, sse::{Event, Sse}},
+    response::{IntoResponse, Response, Html, sse::{Event, Sse}},
 };
 use std::{
     sync::Arc,
@@ -12,7 +12,6 @@ use std::{
     convert::Infallible,
     time::{Duration, SystemTime, UNIX_EPOCH},
     env,
-    sync::OnceLock,
 };
 use crate::assistant::{
     configuration::Configuration,
@@ -25,31 +24,16 @@ use tokio::sync::broadcast;
 use serde_json::json;
 use serde::Deserialize;
 use tokio::sync::Mutex;
-use http::{Method, header};
-use http::header::HeaderValue;
-
-// Increase channel capacity
-const CHANNEL_CAPACITY: usize = 100;
-
-static STATUS_CHANNEL: OnceLock<broadcast::Sender<StatusUpdate>> = OnceLock::new();
-
-fn get_status_channel() -> broadcast::Sender<StatusUpdate> {
-    STATUS_CHANNEL.get_or_init(|| {
-        let (tx, _) = broadcast::channel(CHANNEL_CAPACITY);
-        tx
-    }).clone()
-}
-
-#[derive(Clone)]
-pub struct AppState {
-    graph: Arc<Mutex<ResearchGraph>>,
-    status_tx: broadcast::Sender<StatusUpdate>,
-}
 
 #[derive(Deserialize)]
 struct ConfigUpdate {
     local_llm: Option<String>,
     max_web_research_loops: Option<i32>,
+}
+
+pub struct AppState {
+    graph: Arc<Mutex<ResearchGraph>>,
+    status_tx: broadcast::Sender<StatusUpdate>,
 }
 
 #[derive(serde::Deserialize)]
@@ -93,42 +77,35 @@ struct ConfigResponse {
 }
 
 pub async fn run_server(config: Configuration) {
-    let status_tx = get_status_channel();
-    
+    let (status_tx, _) = broadcast::channel(100);
+    let status_tx_clone = status_tx.clone();
+
     let mut graph = ResearchGraph::new(config);
-    graph.set_status_sender(status_tx.clone());
+    graph.set_status_sender(status_tx_clone);
 
     let state = Arc::new(AppState {
         graph: Arc::new(Mutex::new(graph)),
         status_tx,
     });
 
-    let frontend_origin = env::var("FRONTEND_URL")
-        .unwrap_or_else(|_| "http://localhost:3000".to_string());
+    let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string()).parse::<u16>().unwrap_or(3000);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
     
-    let cors = CorsLayer::new()
-        .allow_methods([Method::GET, Method::POST, Method::PUT])
-        .allow_headers([
-            header::CONTENT_TYPE,
-            header::ACCEPT,
-            header::CACHE_CONTROL,
-            header::CONNECTION,
-        ])
-        .allow_credentials(true)
-        .allow_origin(frontend_origin.parse::<HeaderValue>().unwrap());
+    println!("\n=== Server Information ===");
+    println!("Local URL: http://localhost:{}", port);
+    println!("========================\n");
 
     let app = Router::new()
+        .route("/", get(serve_index))
         .route("/research", post(handle_research))
         .route("/config", put(update_config))
         .route("/config", get(get_config))
         .route("/status", get(status_stream))
-        .layer(cors)
+        .route("/stream/:url", get(handle_stream))
+        .layer(CorsLayer::permissive())
         .with_state(state);
-
-    let port = env::var("PORT").unwrap_or_else(|_| "4000".to_string()).parse::<u16>().unwrap_or(4000);
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
-    println!("Starting server on http://localhost:{}", port);
-    println!("Allowing CORS for origin: {}", frontend_origin);
+    
+    println!("Server is ready to accept connections");
     
     axum::serve(
         tokio::net::TcpListener::bind(&addr).await.unwrap(),
@@ -136,6 +113,378 @@ pub async fn run_server(config: Configuration) {
     )
     .await
     .unwrap();
+}
+
+async fn serve_index() -> Html<&'static str> {
+    Html(r#"
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <title>Research Assistant</title>
+        <style>
+            :root {
+                --bg-color: #1a1a1a;
+                --text-color: #e0e0e0;
+                --primary-color: #3498db;
+                --secondary-color: #2c3e50;
+                --success-color: #27ae60;
+                --error-color: #e74c3c;
+                --border-color: #2c2c2c;
+            }
+            
+            body {
+                font-family: 'Inter', -apple-system, sans-serif;
+                background-color: var(--bg-color);
+                color: var(--text-color);
+                max-width: 1000px;
+                margin: 0 auto;
+                padding: 20px;
+            }
+            
+            .container {
+                display: grid;
+                grid-template-columns: 2fr 1fr;
+                gap: 20px;
+            }
+            
+            .main-content {
+                display: flex;
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            .sidebar {
+                background-color: var(--secondary-color);
+                padding: 20px;
+                border-radius: 8px;
+            }
+            
+            textarea, input {
+                width: 100%;
+                padding: 10px;
+                background-color: var(--secondary-color);
+                border: 1px solid var(--border-color);
+                color: var(--text-color);
+                border-radius: 4px;
+            }
+            
+            textarea {
+                height: 100px;
+                resize: vertical;
+            }
+            
+            button {
+                padding: 10px 20px;
+                background-color: var(--primary-color);
+                color: var(--text-color);
+                border: none;
+                border-radius: 4px;
+                cursor: pointer;
+                transition: opacity 0.2s;
+            }
+            
+            button:hover {
+                opacity: 0.9;
+            }
+            
+            .step {
+                padding: 12px;
+                margin: 4px 0;
+                background-color: var(--secondary-color);
+                border-radius: 4px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                transition: all 0.3s ease;
+                border-left: 4px solid transparent;
+            }
+            
+            .step.active {
+                background-color: var(--primary-color);
+                border-left: 4px solid var(--text-color);
+                transform: translateX(10px);
+            }
+            
+            .step.completed {
+                background-color: var(--success-color);
+                border-left: 4px solid var(--text-color);
+            }
+            
+            .thinking-trace {
+                font-family: monospace;
+                padding: 10px;
+                background-color: var(--secondary-color);
+                border-radius: 4px;
+                margin-top: 10px;
+                max-height: 200px;
+                overflow-y: auto;
+            }
+            
+            .timer {
+                font-family: monospace;
+                color: var(--text-color);
+                min-width: 60px;
+                text-align: right;
+            }
+            
+            .timer.running {
+                color: var(--primary-color);
+            }
+            
+            #result {
+                white-space: pre-wrap;
+                padding: 20px;
+                background-color: var(--secondary-color);
+                border-radius: 4px;
+                display: none;
+            }
+            
+            .config-section {
+                margin-top: 20px;
+                padding: 15px;
+                background-color: var(--secondary-color);
+                border-radius: 4px;
+            }
+            
+            .config-item {
+                margin: 10px 0;
+            }
+            
+            label {
+                display: block;
+                margin-bottom: 5px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="main-content">
+                <h1>Research Assistant</h1>
+                <div>
+                    <label for="topic">Research Topic:</label>
+                    <textarea id="topic" placeholder="Enter your research topic..."></textarea>
+                </div>
+                <button onclick="submitResearch()">Start Research</button>
+                <div id="steps">
+                    <div class="step" id="step-query">
+                        <span>1. Generating Search Query</span>
+                        <span class="timer" id="timer-query">0.0s</span>
+                    </div>
+                    <div class="step" id="step-research">
+                        <span>2. Web Research</span>
+                        <span class="timer" id="timer-research">0.0s</span>
+                    </div>
+                    <div class="step" id="step-summary">
+                        <span>3. Summarizing Results</span>
+                        <span class="timer" id="timer-summary">0.0s</span>
+                    </div>
+                    <div class="step" id="step-reflection">
+                        <span>4. Reflection & Follow-up</span>
+                        <span class="timer" id="timer-reflection">0.0s</span>
+                    </div>
+                    <div class="step" id="step-final">
+                        <span>5. Finalizing Results</span>
+                        <span class="timer" id="timer-final">0.0s</span>
+                    </div>
+                </div>
+                <div id="thinking-trace" class="thinking-trace"></div>
+                <div id="result"></div>
+            </div>
+            
+            <div class="sidebar">
+                <h2>Configuration</h2>
+                <div class="config-section">
+                    <div class="config-item">
+                        <label for="local-llm">Local LLM Model:</label>
+                        <input type="text" id="local-llm" value="deepseek-r1:8b">
+                    </div>
+                    <div class="config-item">
+                        <label for="max-loops">Max Research Loops:</label>
+                        <input type="number" id="max-loops" value="3" min="1" max="10">
+                    </div>
+                    <button onclick="updateConfig()">Update Configuration</button>
+                </div>
+            </div>
+        </div>
+
+        <script>
+        let currentStep = 0;
+        let stepStartTimes = {};
+        let stepElapsedTimes = {};
+        let timerIntervals = {};
+        const steps = ['query', 'research', 'summary', 'reflection', 'final'];
+        let statusSource = null;
+
+        function formatTime(seconds) {
+            return `${seconds.toFixed(1)}s`;
+        }
+
+        function startTimer(step) {
+            stepStartTimes[step] = Date.now();
+            const timerEl = document.getElementById(`timer-${step}`);
+            timerEl.classList.add('running');
+            
+            // Clear any existing interval
+            if (timerIntervals[step]) {
+                clearInterval(timerIntervals[step]);
+            }
+            
+            // Start new interval
+            timerIntervals[step] = setInterval(() => {
+                const elapsed = (Date.now() - stepStartTimes[step]) / 1000;
+                timerEl.textContent = formatTime(elapsed);
+            }, 100);
+        }
+
+        function stopTimer(step) {
+            if (timerIntervals[step]) {
+                clearInterval(timerIntervals[step]);
+                delete timerIntervals[step];
+            }
+            
+            const timerEl = document.getElementById(`timer-${step}`);
+            timerEl.classList.remove('running');
+            
+            // Store final elapsed time
+            stepElapsedTimes[step] = (Date.now() - stepStartTimes[step]) / 1000;
+            timerEl.textContent = formatTime(stepElapsedTimes[step]);
+        }
+
+        function updateStep(stepName, status) {
+            steps.forEach((step, index) => {
+                const el = document.getElementById(`step-${step}`);
+                el.className = 'step';
+                
+                if (step === stepName) {
+                    el.className = 'step active';
+                    currentStep = index;
+                    startTimer(step);
+                } else if (index < currentStep) {
+                    el.className = 'step completed';
+                    if (timerIntervals[step]) {
+                        stopTimer(step);
+                    }
+                }
+            });
+            
+            const trace = document.getElementById('thinking-trace');
+            trace.innerHTML += `<div>[${formatTime((Date.now() - stepStartTimes[stepName] || 0) / 1000)}] ${status}</div>`;
+            trace.scrollTop = trace.scrollHeight;
+        }
+
+        function resetTimers() {
+            steps.forEach(step => {
+                if (timerIntervals[step]) {
+                    clearInterval(timerIntervals[step]);
+                    delete timerIntervals[step];
+                }
+                document.getElementById(`timer-${step}`).textContent = '0.0s';
+                document.getElementById(`timer-${step}`).classList.remove('running');
+            });
+            stepStartTimes = {};
+            stepElapsedTimes = {};
+        }
+
+        async function updateConfig() {
+            const llm = document.getElementById('local-llm').value;
+            const loops = parseInt(document.getElementById('max-loops').value);
+            const button = document.querySelector('.config-section button');
+            const originalText = button.textContent;
+            
+            button.textContent = 'Updating...';
+            button.disabled = true;
+            
+            try {
+                const response = await fetch('/config', {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        local_llm: llm,
+                        max_web_research_loops: loops
+                    }),
+                });
+                
+                const data = await response.json();
+                button.textContent = '✓ Updated';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }, 2000);
+                
+                const trace = document.getElementById('thinking-trace');
+                trace.innerHTML += `<div>Configuration updated: ${data.message}</div>`;
+                trace.scrollTop = trace.scrollHeight;
+            } catch (error) {
+                console.error('Failed to update config:', error);
+                button.textContent = '✗ Error';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                    button.disabled = false;
+                }, 2000);
+            }
+        }
+
+        function connectToStatusStream() {
+            if (statusSource) {
+                statusSource.close();
+            }
+            
+            statusSource = new EventSource('/status');
+            statusSource.onmessage = (event) => {
+                const status = JSON.parse(event.data);
+                updateStep(status.phase, status.message);
+            };
+        }
+
+        async function submitResearch() {
+            const topic = document.getElementById('topic').value;
+            const result = document.getElementById('result');
+            
+            result.style.display = 'block';
+            result.textContent = 'Starting research...';
+            currentStep = 0;
+            
+            document.getElementById('thinking-trace').innerHTML = '';
+            resetTimers();
+            connectToStatusStream();
+            
+            try {
+                const response = await fetch('/research', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ topic }),
+                });
+                
+                const data = await response.json();
+                result.textContent = data.summary;
+                updateStep('final', data.status);
+                
+                // Stop all timers
+                steps.forEach(step => {
+                    if (timerIntervals[step]) {
+                        stopTimer(step);
+                    }
+                });
+                
+                if (statusSource) {
+                    statusSource.close();
+                }
+            } catch (error) {
+                result.textContent = `Error: ${error.message}`;
+                updateStep('final', 'Error occurred');
+            }
+        }
+
+        // Initialize status stream
+        connectToStatusStream();
+        </script>
+    </body>
+    </html>
+    "#)
 }
 
 async fn handle_research(
@@ -157,10 +506,7 @@ async fn handle_research(
         eprintln!("Failed to send initial status update: {}", e);
     }
 
-    let mut graph = state.graph.lock().await;
-    // Update the graph's status sender
-    graph.set_status_sender(state.status_tx.clone());
-
+    let graph = state.graph.lock().await;
     match graph.process_research(input).await {
         Ok(output) => {
             // Send final status update
@@ -205,48 +551,18 @@ async fn status_stream(
     State(state): State<Arc<AppState>>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let mut rx = state.status_tx.subscribe();
-    println!("New SSE connection established");
     
     let stream = async_stream::stream! {
-        let mut retry_count = 0;
-        const MAX_RETRIES: u32 = 3;
-        const RETRY_DELAY: Duration = Duration::from_secs(1);
-
-        loop {
-            match rx.recv().await {
-                Ok(status) => {
-                    let json = serde_json::to_string(&status).unwrap();
-                    println!("Sending status update: {}", json);
-                    retry_count = 0; // Reset retry count on successful message
-                    yield Ok(Event::default()
-                        .data(json)
-                        .id(status.timestamp.to_string()) // Add message ID for retry
-                        .retry(Duration::from_millis(RETRY_DELAY.as_millis() as u64))); // Set retry interval using Duration
-                }
-                Err(e) => {
-                    eprintln!("Error receiving status update: {}", e);
-                    if retry_count < MAX_RETRIES {
-                        retry_count += 1;
-                        eprintln!("Retrying connection ({}/{})", retry_count, MAX_RETRIES);
-                        // Get a fresh receiver and continue
-                        rx = state.status_tx.subscribe();
-                        tokio::time::sleep(RETRY_DELAY * retry_count).await;
-                        continue;
-                    } else {
-                        eprintln!("Max retries reached, closing connection");
-                        break;
-                    }
-                }
-            }
+        while let Ok(status) = rx.recv().await {
+            yield Ok(Event::default().data(serde_json::to_string(&status).unwrap()));
         }
     };
 
-    Sse::new(stream)
-        .keep_alive(
-            axum::response::sse::KeepAlive::new()
-                .interval(Duration::from_secs(1))
-                .text("keep-alive-text")
-        )
+    Sse::new(stream).keep_alive(
+        axum::response::sse::KeepAlive::new()
+            .interval(Duration::from_secs(1))
+            .text("keep-alive-text")
+    )
 }
 
 async fn update_config(
@@ -295,8 +611,31 @@ async fn get_config(
     (
         StatusCode::OK,
         Json(ConfigResponse {
-            local_llm: graph.get_llm_model().to_string(),
-            max_web_research_loops: graph.get_max_loops(),
+            local_llm: graph.config.local_llm.clone(),
+            max_web_research_loops: graph.config.max_web_research_loops,
         })
     )
+}
+
+async fn handle_stream(
+    State(state): State<Arc<AppState>>,
+    Path(_url): Path<String>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    // Create a new SSE stream
+    let stream = async_stream::stream! {
+        let mut rx = state.status_tx.subscribe();
+        
+        // Stream status updates
+        while let Ok(status) = rx.recv().await {
+            let json = serde_json::to_string(&status).unwrap();
+            yield Ok(Event::default().data(json));
+        }
+    };
+
+    Sse::new(stream)
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(Duration::from_secs(1))
+                .text("keep-alive-text")
+        )
 } 

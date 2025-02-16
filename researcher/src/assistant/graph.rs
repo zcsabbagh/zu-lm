@@ -8,7 +8,6 @@ use ollama_rs::generation::completion::request::GenerationRequest;
 use tokio::sync::broadcast::Sender;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
-use std::time::Duration;
 
 use super::configuration::Configuration;
 use super::prompts::{
@@ -21,7 +20,7 @@ use super::utils::{perplexity_search, format_sources};
 
 #[async_trait]
 pub trait Node: Send + Sync {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String>;
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()>;
 }
 
 pub struct QueryGeneratorNode;
@@ -32,7 +31,7 @@ pub struct FinalizerNode;
 
 #[async_trait]
 impl Node for QueryGeneratorNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()> {
         let research_topic = {
             let state = state.lock().await;
             state.research_topic.clone()
@@ -44,33 +43,32 @@ impl Node for QueryGeneratorNode {
         let instructions = format_query_writer_instructions(&research_topic);
         let request = GenerationRequest::new(
             config.local_llm.clone(),
-            format!("{}\n\nEnhance this search query while preserving its core meaning. Original query: {}", 
-                instructions, research_topic),
+            format!("{}\n\nGenerate a query for web search:", instructions),
         );
         
         println!("Sending request to Ollama...");
         let response = ollama.generate(request).await
             .map_err(|e| anyhow::anyhow!("Ollama request failed: {}", e))?;
         
-        // Try to parse as JSON, if fails, use the original topic
+        // Try to parse as JSON, if fails, use the entire response as the query
         let search_query = match serde_json::from_str::<Value>(&response.response) {
             Ok(json) => json["query"]
                 .as_str()
-                .unwrap_or(&research_topic)
+                .unwrap_or(&response.response)
                 .to_string(),
-            Err(_) => research_topic.clone(), // Fallback to original topic if parsing fails
+            Err(_) => response.response.trim().to_string(),
         };
         
         let mut state = state.lock().await;
-        state.set_search_query(search_query.clone());
+        state.set_search_query(search_query);
         
-        Ok(format!("Using search query: {} (based on original topic: {})", search_query, research_topic))
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Node for WebResearchNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<()> {
         let (query, loop_count) = {
             let state = state.lock().await;
             (
@@ -79,21 +77,45 @@ impl Node for WebResearchNode {
             )
         };
         
+        // Start the browser agent search in parallel
+        let query_clone = query.clone();
+        let browser_search = tokio::spawn(async move {
+            let client = reqwest::Client::new();
+            let res = client.post("http://localhost:3001/search")
+                .json(&serde_json::json!({
+                    "query": query_clone
+                }))
+                .send()
+                .await;
+            
+            if let Ok(response) = res {
+                if let Ok(data) = response.json::<serde_json::Value>().await {
+                    if let Some(url) = data.get("publicUrl").and_then(|u| u.as_str()) {
+                        println!("\nWatch the browser automation at: {}", url);
+                    }
+                }
+            }
+        });
+        
+        // Perform our regular perplexity search
         let search_results = perplexity_search(&query, loop_count).await?;
         
         let search_str = format_sources(&search_results);
         let mut state = state.lock().await;
-        state.add_source(search_str.clone());
+        state.add_source(search_str);
         state.increment_loop_count();
         state.add_web_research_result(serde_json::to_string(&search_results)?);
         
-        Ok(format!("Web research results:\n{}", search_str))
+        // Wait for the browser search to complete (but don't block on errors)
+        let _ = browser_search.await;
+        
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Node for SummarizerNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()> {
         let (research_topic, existing_summary, latest_research) = {
             let state = state.lock().await;
             (
@@ -128,7 +150,7 @@ impl Node for SummarizerNode {
         );
         
         let response = ollama.generate(request).await?;
-        let mut summary = response.response.clone();
+        let mut summary = response.response;
         
         // Remove <think> tags if present
         while let (Some(start), Some(end)) = (summary.find("<think>"), summary.find("</think>")) {
@@ -138,13 +160,13 @@ impl Node for SummarizerNode {
         let mut state = state.lock().await;
         state.set_running_summary(summary);
         
-        Ok(response.response)
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Node for ReflectionNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<()> {
         let (research_topic, running_summary) = {
             let state = state.lock().await;
             (
@@ -166,7 +188,6 @@ impl Node for ReflectionNode {
         );
         
         let response = ollama.generate(request).await?;
-        let response_text = response.response.clone();
         
         // Try to parse as JSON, if fails, use a fallback query
         let query = match serde_json::from_str::<Value>(&response.response) {
@@ -180,56 +201,40 @@ impl Node for ReflectionNode {
         let mut state = state.lock().await;
         state.set_search_query(query);
         
-        Ok(response_text)
+        Ok(())
     }
 }
 
 #[async_trait]
 impl Node for FinalizerNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<()> {
         let mut state = state.lock().await;
         let sources = state.sources_gathered.join("\n");
         let summary = state.running_summary.clone().unwrap_or_default();
         
-        let final_summary = format!(
+        state.set_running_summary(format!(
             "## Summary\n\n{}\n\n### Sources:\n{}",
             summary,
             sources
-        );
+        ));
         
-        state.set_running_summary(final_summary.clone());
-        
-        Ok(final_summary)
+        Ok(())
     }
 }
 
 pub struct ResearchGraph {
-    config: Configuration,
+    state: Arc<Mutex<SummaryState>>,
+    pub(crate) config: Configuration,
     status_tx: Option<Sender<StatusUpdate>>,
-    nodes: Vec<Box<dyn Node>>,
 }
 
 impl ResearchGraph {
     pub fn new(config: Configuration) -> Self {
         Self {
+            state: Arc::new(Mutex::new(SummaryState::new())),
             config,
             status_tx: None,
-            nodes: vec![
-                Box::new(QueryGeneratorNode),
-                Box::new(WebResearchNode),
-                Box::new(SummarizerNode),
-                Box::new(ReflectionNode),
-                Box::new(FinalizerNode),
-            ],
         }
-    }
-    
-    pub fn get_llm_model(&self) -> &str {
-        &self.config.local_llm
-    }
-
-    pub fn get_max_loops(&self) -> i32 {
-        self.config.max_web_research_loops
     }
     
     pub fn update_llm(&mut self, new_llm: String) {
@@ -250,88 +255,119 @@ impl ResearchGraph {
         self.status_tx = Some(tx);
     }
 
-    fn send_status(&self, phase: &str, message: &str, chain_of_thought: Option<String>) {
+    fn send_status(&self, phase: &str, message: &str, start_time: Option<SystemTime>) {
         if let Some(tx) = &self.status_tx {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
+            let elapsed = start_time.map(|t| {
+                SystemTime::now()
+                    .duration_since(t)
+                    .unwrap_or_default()
+                    .as_secs_f64()
+            }).unwrap_or_default();
 
-            let status = StatusUpdate {
+            let _ = tx.send(StatusUpdate {
                 phase: phase.to_string(),
                 message: message.to_string(),
-                elapsed_time: 0.0,
-                timestamp: now,
-                chain_of_thought,
-            };
-
-            match tx.send(status) {
-                Ok(_) => println!("Sent status update: phase={}, message={}", phase, message),
-                Err(e) => {
-                    eprintln!("Failed to send status update: {} (phase={}, message={})", e, phase, message);
-                    // Don't fail the research process if status updates fail
-                }
-            }
-        } else {
-            eprintln!("No status sender available for update: phase={}, message={}", phase, message);
+                elapsed_time: elapsed,
+                timestamp: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs(),
+                chain_of_thought: Some("Processing research request".to_string()),
+            });
         }
     }
     
-    pub async fn process_research(&mut self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
-        let state = Arc::new(Mutex::new(SummaryState::with_research_topic(
-            input.research_topic.clone(),
-        )));
+    pub async fn run(&self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
+        {
+            let mut state = self.state.lock().await;
+            state.research_topic = input.research_topic;
+            state.research_loop_count = 0;
+        }
+        
+        println!("Starting initial research loop...");
+        let nodes = vec![
+            Box::new(QueryGeneratorNode) as Box<dyn Node>,
+            Box::new(WebResearchNode) as Box<dyn Node>,
+            Box::new(SummarizerNode) as Box<dyn Node>,
+        ];
+        
+        // Initial research loop with timing
+        let start_time = SystemTime::now();
+        self.send_status("query", "Generating initial search query...", None);
+        nodes[0].process(self.state.clone(), &self.config).await?;
+        self.send_status("query", "Search query generated", Some(start_time));
+        
+        let start_time = SystemTime::now();
+        self.send_status("research", "Performing web research...", None);
+        nodes[1].process(self.state.clone(), &self.config).await?;
+        self.send_status("research", "Web research completed", Some(start_time));
+        
+        let start_time = SystemTime::now();
+        self.send_status("summary", "Summarizing research results...", None);
+        nodes[2].process(self.state.clone(), &self.config).await?;
+        self.send_status("summary", "Summary completed", Some(start_time));
+        
+        // Additional research loops
+        while {
+            let state = self.state.lock().await;
+            state.research_loop_count < self.config.max_web_research_loops
+        } {
+            let start_time = SystemTime::now();
+            self.send_status("reflection", "Analyzing results and identifying knowledge gaps...", None);
+            println!("Starting reflection phase...");
+            let reflection_node = Box::new(ReflectionNode) as Box<dyn Node>;
+            reflection_node.process(self.state.clone(), &self.config).await?;
+            self.send_status("reflection", "Knowledge gaps identified", Some(start_time));
+            
+            let start_time = SystemTime::now();
+            self.send_status("query", "Generating follow-up query...", None);
+            nodes[0].process(self.state.clone(), &self.config).await?;
+            self.send_status("query", "Follow-up query generated", Some(start_time));
+            
+            let start_time = SystemTime::now();
+            self.send_status("research", "Performing additional web research...", None);
+            nodes[1].process(self.state.clone(), &self.config).await?;
+            self.send_status("research", "Additional research completed", Some(start_time));
+            
+            let start_time = SystemTime::now();
+            self.send_status("summary", "Updating research summary...", None);
+            nodes[2].process(self.state.clone(), &self.config).await?;
+            self.send_status("summary", "Summary updated", Some(start_time));
+        }
+        
+        let start_time = SystemTime::now();
+        self.send_status("final", "Finalizing research results...", None);
+        println!("Finalizing research...");
+        let finalizer = Box::new(FinalizerNode) as Box<dyn Node>;
+        finalizer.process(self.state.clone(), &self.config).await?;
+        self.send_status("final", "Research completed", Some(start_time));
+        
+        let state = self.state.lock().await;
+        Ok(SummaryStateOutput {
+            running_summary: state.running_summary.clone().unwrap_or_default(),
+        })
+    }
 
-        // Initial query generation
-        let query_node = &self.nodes[0];
-        self.send_status("query", "Starting initial query generation...", None);
-        let response = query_node.process(state.clone(), &self.config).await?;
-        self.send_status("query", "Completed initial query generation", Some(response.clone()));
+    pub async fn process_research(&self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
+        let mut state = self.state.lock().await;
+        state.research_topic = input.research_topic.clone();
+        drop(state);
 
-        // Main research loop
-        for loop_count in 0..self.config.max_web_research_loops {
-            self.send_status("loop", &format!("Starting research loop {} of {}", loop_count + 1, self.config.max_web_research_loops), None);
+        let nodes: Vec<Box<dyn Node>> = vec![
+            Box::new(QueryGeneratorNode),
+            Box::new(WebResearchNode),
+            Box::new(SummarizerNode),
+            Box::new(ReflectionNode),
+            Box::new(FinalizerNode),
+        ];
 
-            // Web research
-            let research_node = &self.nodes[1];
-            self.send_status("research", &format!("Starting web research for loop {}...", loop_count + 1), None);
-            let response = research_node.process(state.clone(), &self.config).await?;
-            self.send_status("research", &format!("Completed web research for loop {}", loop_count + 1), Some(response.clone()));
-
-            // Summarization
-            let summary_node = &self.nodes[2];
-            self.send_status("summary", &format!("Starting summary for loop {}...", loop_count + 1), None);
-            let response = summary_node.process(state.clone(), &self.config).await?;
-            self.send_status("summary", &format!("Completed summary for loop {}", loop_count + 1), Some(response.clone()));
-
-            // Skip reflection and query generation on the last loop
-            if loop_count < self.config.max_web_research_loops - 1 {
-                // Reflection and next query generation
-                let reflection_node = &self.nodes[3];
-                self.send_status("reflection", &format!("Starting reflection for loop {}...", loop_count + 1), None);
-                let response = reflection_node.process(state.clone(), &self.config).await?;
-                self.send_status("reflection", &format!("Completed reflection for loop {}", loop_count + 1), Some(response.clone()));
-            }
-
-            // Small delay between loops to ensure status updates are received in order
-            tokio::time::sleep(Duration::from_millis(100)).await;
+        for node in nodes {
+            node.process(self.state.clone(), &self.config).await?;
         }
 
-        // Final summary compilation
-        let finalizer_node = &self.nodes[4];
-        self.send_status("final", "Starting final summary compilation...", None);
-        let response = finalizer_node.process(state.clone(), &self.config).await?;
-        self.send_status("final", "Completed final summary compilation", Some(response.clone()));
-
-        let final_state = state.lock().await;
-        let summary = final_state.running_summary.clone().unwrap_or_default();
-        
-        // Send final status update with the actual summary content
-        self.send_status("complete", &summary, Some(format!("Research completed after {} loops. Final summary length: {} chars", 
-            self.config.max_web_research_loops, summary.len())));
-        
+        let state = self.state.lock().await;
         Ok(SummaryStateOutput {
-            running_summary: summary,
+            running_summary: state.running_summary.clone().unwrap_or_default(),
         })
     }
 } 

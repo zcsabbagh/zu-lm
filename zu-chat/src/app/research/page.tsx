@@ -107,7 +107,9 @@ export default function ResearchPage() {
       statusSource.close();
     }
 
-    const eventSource = new EventSource(`${BACKEND_URL}/status`, {
+    console.log('Setting up SSE connection...');
+    
+    const eventSource = new EventSource(`/api/research/status`, {
       withCredentials: true
     });
 
@@ -145,35 +147,55 @@ export default function ResearchPage() {
         }
       } catch (error) {
         console.error('Failed to parse SSE data:', error, event.data);
+        setStatus('Error: Failed to parse research update');
       }
     };
 
-    eventSource.onerror = async (error) => {
-      console.error('SSE error:', error);
+    eventSource.onerror = async (error: Event) => {
+      console.error('SSE connection error:', error);
       eventSource.close();
       
       if (retryCount < MAX_RETRIES) {
-        console.log(`Retrying SSE connection (${retryCount + 1}/${MAX_RETRIES})...`);
-        setRetryCount(prev => prev + 1);
+        const nextRetry = retryCount + 1;
+        console.log(`Retrying SSE connection (${nextRetry}/${MAX_RETRIES})...`);
+        setRetryCount(nextRetry);
+        setStatus(`Connection lost. Retrying (${nextRetry}/${MAX_RETRIES})...`);
+        
+        // Add error to status history
+        setStatusHistory(prev => [...prev, {
+          phase: 'error',
+          message: `Connection lost. Retrying (${nextRetry}/${MAX_RETRIES})...`,
+          timestamp: Date.now() / 1000,
+        }]);
+        
         // Exponential backoff
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
         setupSSEConnection();
       } else {
         setStatusSource(null);
         setIsLoading(false);
-        setStatus('Error: Lost connection to research service');
+        const errorMessage = 'Lost connection to research service. Please try again.';
+        setStatus(`Error: ${errorMessage}`);
         setStatusHistory(prev => [...prev, {
           phase: 'error',
-          message: 'Lost connection to research service',
+          message: errorMessage,
           timestamp: Date.now() / 1000,
         }]);
       }
     };
 
-    eventSource.onopen = async () => {
+    eventSource.onopen = () => {
       console.log('SSE connection opened');
       setStatusSource(eventSource);
       setRetryCount(0);
+      setStatus('Connected to research service...');
+      
+      // Add connection status to history
+      setStatusHistory(prev => [...prev, {
+        phase: 'info',
+        message: 'Connected to research service',
+        timestamp: Date.now() / 1000,
+      }]);
     };
 
     return eventSource;
@@ -191,6 +213,8 @@ export default function ResearchPage() {
     setTotalLoops(0);
 
     try {
+      console.log('Starting research process...');
+      
       // First establish SSE connection
       const eventSource = setupSSEConnection();
       
@@ -204,10 +228,17 @@ export default function ResearchPage() {
           clearTimeout(timeout);
           resolve();
         };
+
+        eventSource.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error('Failed to establish SSE connection'));
+        };
       });
 
+      console.log('SSE connection established, sending research request...');
+
       // Now start the research process
-      const response = await fetch(`${BACKEND_URL}/research`, {
+      const response = await fetch(`/api/research`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -217,15 +248,16 @@ export default function ResearchPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Research request failed');
+        throw new Error(`Research request failed: ${response.status} ${response.statusText}`);
       }
     } catch (error) {
       console.error('Research error:', error);
       setIsLoading(false);
-      setStatus('Error: Failed to start research');
+      const errorMessage = error instanceof Error ? error.message : 'Failed to start research';
+      setStatus(`Error: ${errorMessage}`);
       setStatusHistory(prev => [...prev, {
         phase: 'error',
-        message: 'Failed to start research',
+        message: errorMessage,
         timestamp: Date.now() / 1000,
       }]);
 

@@ -1271,7 +1271,6 @@ dependencies = [
  "dotenv",
  "enum-as-inner",
  "futures",
- "http 1.2.0",
  "langchain",
  "ollama-rs",
  "reqwest 0.11.27",
