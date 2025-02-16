@@ -47,7 +47,7 @@ export default function Home() {
   const [transcript, setTranscript] = useState<any[]>([]);
   const [currentSegment, setCurrentSegment] = useState(0);
   const [displayedMessages, setDisplayedMessages] = useState<any[]>([]);
-  const [speakerImages, setSpeakerImages] = useState<any[]>([]);
+  const [speakerImages, setSpeakerImages] = useState<SpeakerImage[]>([]);
   const [trackOne, setTrackOne] = useState<string | null>(null);
   const [trackTwo, setTrackTwo] = useState<string | null>(null);
   const [selectedTrack, setSelectedTrack] = useState<'one' | 'two'>('one');
