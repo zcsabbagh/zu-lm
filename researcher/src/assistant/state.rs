@@ -22,10 +22,11 @@ impl ResearchTrack {
     }
 
     pub fn should_continue_research(&self) -> bool {
-        // Continue if we have meaningful content and haven't reached diminishing returns
-        !self.running_summary.is_empty() && 
-        self.web_research_results.len() > 0 &&
-        self.research_loop_count < 3 // Hard limit to prevent infinite loops
+        // Continue if either:
+        // 1. We haven't started yet (no summary or results)
+        // 2. We have meaningful content and haven't reached diminishing returns
+        (self.running_summary.is_empty() && self.web_research_results.is_empty()) ||
+        (!self.running_summary.is_empty() && self.web_research_results.len() > 0 && self.research_loop_count < 3)
     }
 }
 
