@@ -26,6 +26,12 @@ const DURATIONS = [
   { value: "5", label: "5 minutes" },
 ] as const;
 
+interface SpeakerImage {
+  speaker: string;
+  imageUrl: string | null;
+  error?: string;
+}
+
 export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [language, setLanguage] = useState<typeof LANGUAGES[number]["value"]>("English");
@@ -38,6 +44,9 @@ export default function Home() {
   const [displayedMessages, setDisplayedMessages] = useState<Array<{ role: string; content: string }>>([]);
   const audioRef = useRef<HTMLAudioElement>(null);
   const { messages, setMessages } = useChat();
+  const [speakerImages, setSpeakerImages] = useState<SpeakerImage[]>([]);
+  const [isGeneratingImages, setIsGeneratingImages] = useState(false);
+  const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
     // Check for research summary in localStorage
@@ -50,7 +59,7 @@ export default function Home() {
 
   useEffect(() => {
     // Handle audio playback and transcript synchronization
-    if (audioSegments.length > 0 && currentSegment < audioSegments.length) {
+    if (isReady && audioSegments.length > 0 && currentSegment < audioSegments.length) {
       const audio = audioRef.current;
       if (audio) {
         const blob = new Blob([audioSegments[currentSegment]], { type: 'audio/mpeg' });
@@ -79,13 +88,16 @@ export default function Home() {
         };
       }
     }
-  }, [audioSegments, currentSegment, transcript]);
+  }, [audioSegments, currentSegment, transcript, isReady]);
 
   const handleGenerate = async () => {
     setIsGenerating(true);
+    setIsReady(false);
     setDisplayedMessages([]); // Clear previous messages
     setCurrentSegment(0); // Reset segment counter
+    setSpeakerImages([]); // Clear previous images
     try {
+      // Generate podcast audio
       const response = await fetch('/api/generate', {
         method: 'POST',
         headers: {
@@ -124,6 +136,40 @@ export default function Home() {
 
       setAudioSegments(segments);
       setTranscript(data.transcript);
+
+      // Generate images for all segments
+      setIsGeneratingImages(true);
+      try {
+        const imageResponse = await fetch('/api/generate/images', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            transcript: data.transcript,
+          }),
+        });
+
+        if (!imageResponse.ok) {
+          throw new Error('Failed to generate images');
+        }
+
+        const imageData = await imageResponse.json();
+        if (imageData.error) {
+          throw new Error(imageData.error);
+        }
+
+        setSpeakerImages(imageData.images);
+        // Set ready state after both audio and images are generated
+        setIsReady(true);
+      } catch (error) {
+        console.error('Error generating images:', error);
+        // Even if image generation fails, we can still proceed with audio
+        setIsReady(true);
+      } finally {
+        setIsGeneratingImages(false);
+      }
+
       setResearchSummary(null);
     } catch (error) {
       console.error('Generation error:', error);
@@ -199,7 +245,40 @@ export default function Home() {
 
       {displayedMessages.length > 0 && (
         <div className="mt-6">
-          <Chat messages={displayedMessages} />
+          <div className="space-y-4">
+            {displayedMessages.map((message, index) => {
+              if (message.role === 'assistant') {
+                const speakerImage = speakerImages[index];
+                return (
+                  <div key={index} className="flex gap-4 items-start">
+                    <div className="w-32 flex-shrink-0">
+                      {speakerImage?.imageUrl ? (
+                        <img
+                          src={speakerImage.imageUrl}
+                          alt={`${speakerImage.speaker} speaking`}
+                          className="w-full h-32 object-cover rounded-lg"
+                        />
+                      ) : (
+                        <div className="w-full h-32 bg-gray-200 rounded-lg flex items-center justify-center">
+                          {isGeneratingImages ? (
+                            <div className="text-sm text-gray-500">Generating...</div>
+                          ) : (
+                            <div className="text-sm text-gray-500">No image</div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex-grow">
+                      <div className="bg-blue-50 p-4 rounded-lg">
+                        <p className="text-sm text-gray-800">{message.content}</p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              return null;
+            })}
+          </div>
         </div>
       )}
     </div>
