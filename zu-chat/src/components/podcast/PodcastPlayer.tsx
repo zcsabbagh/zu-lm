@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { EnrichmentPopup } from './EnrichmentPopup';
 
 interface PodcastPlayerProps {
   content: string;
@@ -23,6 +24,9 @@ export function PodcastPlayer({
   const [duration, setDuration] = useState("00:00:00");
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [selectedText, setSelectedText] = useState('');
+  const [showEnrichment, setShowEnrichment] = useState(false);
+  const [selectionPosition, setSelectionPosition] = useState({ x: 0, y: 0 });
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -126,6 +130,31 @@ export function PodcastPlayer({
     }
   };
 
+  const handleTextSelection = () => {
+    const selection = window.getSelection();
+    if (selection && selection.toString().trim().length > 0) {
+      const range = selection.getRangeAt(0);
+      const rect = range.getBoundingClientRect();
+      
+      setSelectedText(selection.toString().trim());
+      setSelectionPosition({
+        x: rect.x + rect.width / 2,
+        y: rect.y - 10
+      });
+      setShowEnrichment(true);
+    } else {
+      setSelectedText('');
+      setShowEnrichment(false);
+    }
+  };
+
+  useEffect(() => {
+    document.addEventListener('mouseup', handleTextSelection);
+    return () => {
+      document.removeEventListener('mouseup', handleTextSelection);
+    };
+  }, []);
+
   return (
     <div className="w-full bg-zinc-900 rounded-lg overflow-hidden p-6 text-white">
       <div className="flex gap-6">
@@ -176,7 +205,29 @@ export function PodcastPlayer({
 
           <h1 className="text-2xl font-bold">AI Research Discussion</h1>
           
-          <p className="text-lg text-zinc-300">{content}</p>
+          <p className="text-lg text-zinc-300 select-text" onMouseUp={handleTextSelection}>
+            {content}
+          </p>
+
+          {/* Enrichment popup */}
+          {showEnrichment && selectedText && (
+            <div
+              style={{
+                position: 'fixed',
+                left: `${selectionPosition.x}px`,
+                top: `${selectionPosition.y}px`,
+                transform: 'translate(-50%, -100%)',
+              }}
+            >
+              <EnrichmentPopup
+                selectedText={selectedText}
+                onClose={() => {
+                  setShowEnrichment(false);
+                  setSelectedText('');
+                }}
+              />
+            </div>
+          )}
 
           {/* Audio controls */}
           <div className="space-y-4">
