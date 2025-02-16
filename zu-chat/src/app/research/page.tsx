@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
+import { Switch } from '@/components/ui/switch';
 
 interface StatusUpdate {
   phase: string;
@@ -18,6 +19,14 @@ interface StatusMessage {
   message: string;
   timestamp: number;
   chain_of_thought?: string;
+}
+
+interface ResearchConfig {
+  local_llm: string;
+  max_web_research_loops: number;
+  research_mode: 'local' | 'remote';
+  groq_model: string;
+  groq_api_key?: string;
 }
 
 const formatMessage = (message: string, chain_of_thought?: string) => {
@@ -90,6 +99,8 @@ export default function ResearchPage() {
   const router = useRouter();
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 1000; // 1 second
+  const [config, setConfig] = useState<ResearchConfig | null>(null);
+  const [isRemoteMode, setIsRemoteMode] = useState(false);
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_RESEARCHER_URL || 'http://localhost:4000';
 
@@ -101,6 +112,26 @@ export default function ResearchPage() {
       }
     };
   }, [statusSource]);
+
+  useEffect(() => {
+    // Load initial configuration
+    const loadConfig = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/config`, {
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          throw new Error('Failed to load configuration');
+        }
+        const data = await response.json();
+        setConfig(data);
+        setIsRemoteMode(data.research_mode === 'remote');
+      } catch (error) {
+        console.error('Failed to load configuration:', error);
+      }
+    };
+    loadConfig();
+  }, [BACKEND_URL]);
 
   const setupSSEConnection = () => {
     if (statusSource) {
@@ -243,6 +274,33 @@ export default function ResearchPage() {
     router.push('/');
   };
 
+  const handleModeChange = async (checked: boolean) => {
+    try {
+      setIsRemoteMode(checked);
+      const response = await fetch(`${BACKEND_URL}/config`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          research_mode: checked ? 'remote' : 'local',
+        }),
+        credentials: 'include',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to update configuration');
+      }
+
+      const data = await response.json();
+      setConfig(prev => prev ? { ...prev, research_mode: checked ? 'remote' : 'local' } : null);
+    } catch (error) {
+      console.error('Failed to update configuration:', error);
+      // Revert the toggle if update fails
+      setIsRemoteMode(!checked);
+    }
+  };
+
   // Group status messages by loop
   const groupedStatusHistory = statusHistory.reduce((groups, status) => {
     let loop = 0;
@@ -272,6 +330,26 @@ export default function ResearchPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-4">Research Assistant</h1>
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium">Research Mode</h2>
+              <p className="text-sm text-gray-600">
+                {isRemoteMode ? 'Using Groq API for research' : 'Using local Ollama for research'}
+              </p>
+            </div>
+            <Switch
+              checked={isRemoteMode}
+              onCheckedChange={handleModeChange}
+              disabled={isLoading}
+            />
+          </div>
+          {isRemoteMode && !config?.groq_api_key && (
+            <div className="mt-2 text-sm text-yellow-600">
+              Warning: Groq API key not configured. Please add it to your .env file.
+            </div>
+          )}
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="topic" className="block text-sm font-medium mb-2">
