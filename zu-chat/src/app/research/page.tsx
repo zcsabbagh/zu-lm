@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import Image from "next/image";
 import {
   Card,
   CardContent,
@@ -51,6 +52,69 @@ interface ResearchConfig {
   groq_model: string;
   groq_api_key?: string;
 }
+
+interface ResearchSource {
+  title: string;
+  url: string;
+  content: string;
+  sourceNumber: number;
+  domain: string;
+}
+
+interface SourceListProps {
+  sources: ResearchSource[];
+  title: string;
+}
+
+const SourceList = ({ sources, title }: SourceListProps) => {
+  return (
+    <div className="space-y-4">
+      <h3 className="font-semibold text-lg">{title}</h3>
+      <div className="space-y-2">
+        {sources.map((source, index) => {
+          const faviconUrl = source.url !== '#' 
+            ? `https://www.google.com/s2/favicons?domain=${source.domain}&sz=32`
+            : '/default-favicon.png'; // You'll need to add this default image to your public folder
+          
+          return (
+            <a 
+              key={index}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`block ${source.url === '#' ? 'cursor-not-allowed' : ''}`}
+              onClick={source.url === '#' ? (e) => e.preventDefault() : undefined}
+            >
+              <div className="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+                <div className="flex items-center space-x-3 flex-1">
+                  <span className="text-gray-500 text-sm min-w-[24px]">{source.sourceNumber}</span>
+                  <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded overflow-hidden">
+                    <Image
+                      src={faviconUrl}
+                      alt={source.domain || 'favicon'}
+                      width={32}
+                      height={32}
+                      className="rounded"
+                      onError={(e) => {
+                        // Fallback to default image on error
+                        const imgElement = e.target as HTMLImageElement;
+                        imgElement.src = '/default-favicon.png';
+                      }}
+                    />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900 truncate">{source.title}</p>
+                    <p className="text-sm text-gray-500 truncate">{source.domain || 'Unknown source'}</p>
+                  </div>
+                </div>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+};
 
 const formatMessage = (message: string, chain_of_thought?: { content: string }) => {
   // Remove the phase prefix if it exists
@@ -390,6 +454,48 @@ export default function ResearchPage() {
     return formatMessage(message, chain_of_thought);
   };
 
+  // Update the source parsing function
+  const parseSourcesFromText = (sourcesText: string): ResearchSource[] => {
+    const sourceLines = sourcesText.split('\n')
+      .filter(line => line.trim())
+      .filter((line, index, self) => {
+        // Remove duplicates by checking if this is the first occurrence of the line
+        return self.indexOf(line) === index;
+      });
+
+    return sourceLines.map((line, index) => {
+      const matches = line.match(/(?:Perplexity Search \d+, )?Source \d+ \((.*?)\)/);
+      if (matches) {
+        const url = matches[1];
+        try {
+          const domain = new URL(url).hostname;
+          return {
+            title: `Source ${index + 1}`,
+            url,
+            content: '',
+            sourceNumber: index + 1,
+            domain
+          };
+        } catch (e) {
+          return {
+            title: `Source ${index + 1}`,
+            url: '#',
+            content: '',
+            sourceNumber: index + 1,
+            domain: 'Invalid URL'
+          };
+        }
+      }
+      return {
+        title: `Source ${index + 1}`,
+        url: '#',
+        content: '',
+        sourceNumber: index + 1,
+        domain: 'Unknown source'
+      };
+    });
+  };
+
   return (
     <div className="container mx-auto px-4 py-16">
       <div className="mb-6">
@@ -511,7 +617,42 @@ export default function ResearchPage() {
             </CardHeader>
             <CardContent>
               <div className="prose max-w-none">
-                <ReactMarkdown>{summary}</ReactMarkdown>
+                {(() => {
+                  const trackOneMatch = summary.match(/### Track One\n([\s\S]*?)(?=\n### Track One Sources:)/);
+                  const trackTwoMatch = summary.match(/### Track Two\n([\s\S]*?)(?=\n### Track Two Sources:)/);
+                  const trackOneSourcesMatch = summary.match(/### Track One Sources:\n([\s\S]*?)(?=\n### Track Two)/);
+                  const trackTwoSourcesMatch = summary.match(/### Track Two Sources:\n([\s\S]*?)$/);
+
+                  return (
+                    <>
+                      {/* Extract and format track one content */}
+                      <h3>Research Agent 1</h3>
+                      {trackOneMatch && <ReactMarkdown>{trackOneMatch[1]}</ReactMarkdown>}
+                      
+                      <div className="mb-4" />
+                      {/* Parse and display track one sources */}
+                      {trackOneSourcesMatch && (
+                        <SourceList 
+                          title="Sources" 
+                          sources={parseSourcesFromText(trackOneSourcesMatch[1])}
+                        />
+                      )}
+                      <div className="mb-8" />
+                      {/* Extract and format track two content */}
+                      <h3>Research Agent 2</h3>
+                      {trackTwoMatch && <ReactMarkdown>{trackTwoMatch[1]}</ReactMarkdown>}
+                      <div className="mb-4" />
+                      {/* Parse and display track two sources */}
+                      {trackTwoSourcesMatch && (
+                        <SourceList 
+                          title="Sources" 
+                          sources={parseSourcesFromText(trackTwoSourcesMatch[1])}
+                        />
+                      )}
+                      <div className="mb-4" />
+                    </>
+                  );
+                })()}
               </div>
             </CardContent>
           </Card>
