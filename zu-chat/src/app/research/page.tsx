@@ -3,6 +3,13 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import ReactMarkdown from 'react-markdown';
+import { Switch } from '@/components/ui/switch';
+
+interface DebatePerspectives {
+  perspective_one: string;
+  perspective_two: string;
+  topic: string;
+}
 
 interface StatusUpdate {
   phase: string;
@@ -11,6 +18,8 @@ interface StatusUpdate {
   timestamp: number;
   summary?: string;
   chain_of_thought?: string;
+  track?: string;
+  perspectives?: DebatePerspectives;
 }
 
 interface StatusMessage {
@@ -18,6 +27,16 @@ interface StatusMessage {
   message: string;
   timestamp: number;
   chain_of_thought?: string;
+  track?: string;
+  perspectives?: DebatePerspectives;
+}
+
+interface ResearchConfig {
+  local_llm: string;
+  max_web_research_loops: number;
+  research_mode: 'local' | 'remote';
+  groq_model: string;
+  groq_api_key?: string;
 }
 
 const formatMessage = (message: string, chain_of_thought?: string) => {
@@ -90,6 +109,8 @@ export default function ResearchPage() {
   const router = useRouter();
   const MAX_RETRIES = 3;
   const RETRY_DELAY = 1000; // 1 second
+  const [config, setConfig] = useState<ResearchConfig | null>(null);
+  const [isRemoteMode, setIsRemoteMode] = useState(false);
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_RESEARCHER_URL || 'http://localhost:4000';
 
@@ -102,82 +123,104 @@ export default function ResearchPage() {
     };
   }, [statusSource]);
 
+  useEffect(() => {
+    // Load initial configuration
+    const loadConfig = async () => {
+      try {
+        const response = await fetch(`${BACKEND_URL}/config`, {
+          credentials: 'include',
+        });
+        if (!response.ok) {
+          throw new Error('Failed to load configuration');
+        }
+        const data = await response.json();
+        setConfig(data);
+        setIsRemoteMode(data.research_mode === 'remote');
+      } catch (error) {
+        console.error('Failed to load configuration:', error);
+      }
+    };
+    loadConfig();
+  }, [BACKEND_URL]);
+
   const setupSSEConnection = () => {
     if (statusSource) {
-      statusSource.close();
+        statusSource.close();
+        setStatusSource(null);
     }
 
     const eventSource = new EventSource(`${BACKEND_URL}/status`, {
-      withCredentials: true
+        withCredentials: true
     });
 
     eventSource.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as StatusUpdate;
-        console.log('Received status update:', data);
-        
-        setStatus(data.message);
-        setPhase(data.phase);
-        setRetryCount(0); // Reset retry count on successful message
+        try {
+            const data = JSON.parse(event.data) as StatusUpdate;
+            console.log('Received status update:', data);
+            
+            setStatus(data.message);
+            setPhase(data.phase);
+            setRetryCount(0); // Reset retry count on successful message
 
-        // Update loop progress
-        if (data.message.includes('Starting research loop')) {
-          const match = data.message.match(/loop (\d+) of (\d+)/);
-          if (match) {
-            setCurrentLoop(parseInt(match[1]));
-            setTotalLoops(parseInt(match[2]));
-          }
+            // Update loop progress
+            if (data.message.includes('Starting research loop')) {
+                const match = data.message.match(/loop (\d+) of (\d+)/);
+                if (match) {
+                    setCurrentLoop(parseInt(match[1]));
+                    setTotalLoops(parseInt(match[2]));
+                }
+            }
+            
+            // Add to status history
+            setStatusHistory(prev => [...prev, {
+                phase: data.phase,
+                message: data.message,
+                timestamp: data.timestamp,
+                chain_of_thought: data.chain_of_thought,
+                track: data.track,
+                perspectives: data.perspectives,
+            }]);
+            
+            if (data.phase === 'complete') {
+                setSummary(data.message);
+                eventSource.close();
+                setStatusSource(null);
+                setIsLoading(false);
+            }
+        } catch (error) {
+            console.error('Failed to parse SSE data:', error, event.data);
         }
-        
-        // Add to status history
-        setStatusHistory(prev => [...prev, {
-          phase: data.phase,
-          message: data.message,
-          timestamp: data.timestamp,
-          chain_of_thought: data.chain_of_thought,
-        }]);
-        
-        if (data.phase === 'complete') {
-          setSummary(data.message);
-          eventSource.close();
-          setStatusSource(null);
-          setIsLoading(false);
-        }
-      } catch (error) {
-        console.error('Failed to parse SSE data:', error, event.data);
-      }
     };
 
     eventSource.onerror = async (error) => {
-      console.error('SSE error:', error);
-      eventSource.close();
-      
-      if (retryCount < MAX_RETRIES) {
-        console.log(`Retrying SSE connection (${retryCount + 1}/${MAX_RETRIES})...`);
-        setRetryCount(prev => prev + 1);
-        // Exponential backoff
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
-        setupSSEConnection();
-      } else {
+        console.error('SSE error:', error);
+        eventSource.close();
         setStatusSource(null);
-        setIsLoading(false);
-        setStatus('Error: Lost connection to research service');
-        setStatusHistory(prev => [...prev, {
-          phase: 'error',
-          message: 'Lost connection to research service',
-          timestamp: Date.now() / 1000,
-        }]);
-      }
+        
+        if (retryCount < MAX_RETRIES) {
+            console.log(`Retrying SSE connection (${retryCount + 1}/${MAX_RETRIES})...`);
+            setRetryCount(prev => prev + 1);
+            // Exponential backoff
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY * Math.pow(2, retryCount)));
+            setupSSEConnection();
+        } else {
+            setIsLoading(false);
+            setStatus('Error: Lost connection to research service');
+            setStatusHistory(prev => [...prev, {
+                phase: 'error',
+                message: 'Lost connection to research service',
+                timestamp: Date.now() / 1000,
+            }]);
+        }
     };
 
-    eventSource.onopen = async () => {
-      console.log('SSE connection opened');
-      setStatusSource(eventSource);
-      setRetryCount(0);
+    eventSource.onopen = () => {
+        console.log('SSE connection opened');
+        setRetryCount(0);
     };
 
     return eventSource;
-  };
+};
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -191,56 +234,88 @@ export default function ResearchPage() {
     setTotalLoops(0);
 
     try {
-      // First establish SSE connection
-      const eventSource = setupSSEConnection();
-      
-      // Wait for connection to be established
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error('SSE connection timeout'));
-        }, 5000);
+        // First establish SSE connection
+        const eventSource = setupSSEConnection();
+        setStatusSource(eventSource);
 
-        eventSource.onopen = () => {
-          clearTimeout(timeout);
-          resolve();
-        };
-      });
+        // Now start the research process
+        const response = await fetch(`${BACKEND_URL}/research`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ topic }),
+            credentials: 'include',
+        });
 
-      // Now start the research process
-      const response = await fetch(`${BACKEND_URL}/research`, {
-        method: 'POST',
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Research request failed' }));
+            throw new Error(errorData.error || 'Research request failed');
+        }
+
+        const data = await response.json();
+        if (data.error) {
+            throw new Error(data.error);
+        }
+    } catch (error) {
+        console.error('Research error:', error);
+        setIsLoading(false);
+        const errorMessage = error instanceof Error ? error.message : 'Failed to start research';
+        setStatus(`Error: ${errorMessage}`);
+        setStatusHistory(prev => [...prev, {
+            phase: 'error',
+            message: errorMessage,
+            timestamp: Date.now() / 1000,
+        }]);
+
+        if (statusSource) {
+            statusSource.close();
+            setStatusSource(null);
+        }
+    }
+};
+
+  const handleCreatePodcast = () => {
+    // Extract track one and track two from the summary
+    const trackOneMatch = summary.match(/### Track One\n([\s\S]*?)(?=\n### Track One Sources:)/);
+    const trackTwoMatch = summary.match(/### Track Two\n([\s\S]*?)(?=\n### Track Two Sources:)/);
+    
+    const trackOne = trackOneMatch ? trackOneMatch[1].trim() : '';
+    const trackTwo = trackTwoMatch ? trackTwoMatch[1].trim() : '';
+    
+    // Store both tracks in localStorage
+    localStorage.setItem('researchSummaryTrackOne', trackOne);
+    localStorage.setItem('researchSummaryTrackTwo', trackTwo);
+    
+    // Navigate to the podcast creation page
+    router.push('/');
+  };
+
+  const handleModeChange = async (checked: boolean) => {
+    try {
+      setIsRemoteMode(checked);
+      const response = await fetch(`${BACKEND_URL}/config`, {
+        method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ topic }),
+        body: JSON.stringify({
+          research_mode: checked ? 'remote' : 'local',
+        }),
         credentials: 'include',
       });
 
       if (!response.ok) {
-        throw new Error('Research request failed');
+        throw new Error('Failed to update configuration');
       }
+
+      const data = await response.json();
+      setConfig(prev => prev ? { ...prev, research_mode: checked ? 'remote' : 'local' } : null);
     } catch (error) {
-      console.error('Research error:', error);
-      setIsLoading(false);
-      setStatus('Error: Failed to start research');
-      setStatusHistory(prev => [...prev, {
-        phase: 'error',
-        message: 'Failed to start research',
-        timestamp: Date.now() / 1000,
-      }]);
-
-      if (statusSource) {
-        statusSource.close();
-        setStatusSource(null);
-      }
+      console.error('Failed to update configuration:', error);
+      // Revert the toggle if update fails
+      setIsRemoteMode(!checked);
     }
-  };
-
-  const handleCreatePodcast = () => {
-    // Store the research summary in localStorage
-    localStorage.setItem('researchSummary', summary);
-    // Navigate to the podcast creation page
-    router.push('/');
   };
 
   // Group status messages by loop
@@ -272,6 +347,26 @@ export default function ResearchPage() {
     <div className="container mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold mb-4">Research Assistant</h1>
+        <div className="mb-4 p-4 bg-gray-50 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-medium">Research Mode</h2>
+              <p className="text-sm text-gray-600">
+                {isRemoteMode ? 'Using Groq API for research' : 'Using local Ollama for research'}
+              </p>
+            </div>
+            <Switch
+              checked={isRemoteMode}
+              onCheckedChange={handleModeChange}
+              disabled={isLoading}
+            />
+          </div>
+          {isRemoteMode && !config?.groq_api_key && (
+            <div className="mt-2 text-sm text-yellow-600">
+              Warning: Groq API key not configured. Please add it to your .env file.
+            </div>
+          )}
+        </div>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label htmlFor="topic" className="block text-sm font-medium mb-2">
@@ -317,25 +412,87 @@ export default function ResearchPage() {
       {statusHistory.length > 0 && (
         <div className="space-y-4">
           <h2 className="text-lg font-semibold">Research Progress</h2>
-          <div className="border rounded-lg divide-y">
-            {statusHistory.map((status, index) => (
-              <div key={index} className="p-4">
-                <div className="flex items-start">
-                  <div className="flex-shrink-0">
-                    <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
-                      status.phase === 'error' ? 'bg-red-100 text-red-800' :
-                      status.phase === 'complete' ? 'bg-green-100 text-green-800' :
-                      'bg-blue-100 text-blue-800'
-                    }`}>
-                      {status.phase}
-                    </span>
+          
+          {/* Show debate perspectives if available */}
+          {statusHistory.some(s => s.perspectives) && (
+            <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+              <h3 className="text-md font-semibold mb-2">Debate Perspectives</h3>
+              {statusHistory
+                .filter(s => s.perspectives)
+                .slice(-1)[0].perspectives && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-3 bg-white rounded-lg">
+                      <h4 className="font-medium mb-1">Perspective One</h4>
+                      <p className="text-sm text-gray-600">
+                        {statusHistory.filter(s => s.perspectives).slice(-1)[0].perspectives!.perspective_one}
+                      </p>
+                    </div>
+                    <div className="p-3 bg-white rounded-lg">
+                      <h4 className="font-medium mb-1">Perspective Two</h4>
+                      <p className="text-sm text-gray-600">
+                        {statusHistory.filter(s => s.perspectives).slice(-1)[0].perspectives!.perspective_two}
+                      </p>
+                    </div>
                   </div>
-                  <div className="ml-4 flex-grow">
-                    {formatMessage(status.message, status.chain_of_thought)}
-                  </div>
-                </div>
+                )}
+            </div>
+          )}
+
+          {/* Split view for parallel research tracks */}
+          <div className="grid grid-cols-2 gap-4">
+            {/* Track One */}
+            <div className="border rounded-lg divide-y">
+              <div className="p-3 bg-blue-50">
+                <h3 className="font-medium">Track One Progress</h3>
               </div>
-            ))}
+              {statusHistory
+                .filter(status => !status.track || status.track === 'one')
+                .map((status, index) => (
+                  <div key={`track-one-${index}`} className="p-4">
+                    <div className="flex items-start">
+                      <div className="flex-shrink-0">
+                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
+                          status.phase === 'error' ? 'bg-red-100 text-red-800' :
+                          status.phase === 'complete' ? 'bg-green-100 text-green-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {status.phase}
+                        </span>
+                      </div>
+                      <div className="ml-4 flex-grow">
+                        {formatMessage(status.message, status.chain_of_thought)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
+
+            {/* Track Two */}
+            <div className="border rounded-lg divide-y">
+              <div className="p-3 bg-blue-50">
+                <h3 className="font-medium">Track Two Progress</h3>
+              </div>
+              {statusHistory
+                .filter(status => status.track === 'two')
+                .map((status, index) => (
+                  <div key={`track-two-${index}`} className="p-4">
+                    <div className="flex items-start">
+                      <div className="flex-shrink-0">
+                        <span className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
+                          status.phase === 'error' ? 'bg-red-100 text-red-800' :
+                          status.phase === 'complete' ? 'bg-green-100 text-green-800' :
+                          'bg-blue-100 text-blue-800'
+                        }`}>
+                          {status.phase}
+                        </span>
+                      </div>
+                      <div className="ml-4 flex-grow">
+                        {formatMessage(status.message, status.chain_of_thought)}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+            </div>
           </div>
         </div>
       )}
