@@ -172,6 +172,12 @@ impl Node for SummarizerNode {
             summary = format!("{}{}", &summary[..start], &summary[end + 8..]);
         }
         
+        // Update the running summary in the state
+        {
+            let mut state_lock = state.lock().await;
+            state_lock.set_running_summary(track, summary.clone());
+        }
+        
         Ok(summary)
     }
 }
@@ -322,53 +328,47 @@ impl ResearchGraph {
     }
     
     pub async fn process_research(&mut self, input: SummaryStateInput) -> Result<SummaryStateOutput> {
-        let state = Arc::new(Mutex::new(SummaryState::with_research_topic(
-            input.research_topic.clone(),
-        )));
+        let state = Arc::new(Mutex::new(SummaryState::with_research_topic(input.research_topic.clone())));
+
+        // Generate debate perspectives first
+        self.send_status("init", "Generating debate perspectives...", None);
+        let perspectives = generate_debate_perspectives(&input.research_topic, &self.config).await?;
+        
+        // Update state with perspectives
+        {
+            let mut state_lock = state.lock().await;
+            state_lock.set_debate_perspectives(perspectives.clone());
+        }
+        
+        // Send status update with perspectives
+        self.send_status("perspectives", "Generated debate perspectives", Some(perspectives));
 
         if let ResearchMode::Remote = self.config.research_mode {
-            // Generate debate perspectives first
-            self.send_status_with_track("init", "Generating debate perspectives...", None, None);
+            // Process both tracks in parallel using tokio::join!
+            let track_one_future = self.process_track(state.clone(), "one");
+            let track_two_future = self.process_track(state.clone(), "two");
+
+            let (track_one_result, track_two_result) = tokio::join!(track_one_future, track_two_future);
+
+            // Check results from both tracks
+            track_one_result?;
+            track_two_result?;
+
+            // Generate final summary combining both perspectives
+            let finalizer_node = &self.nodes[4];
+            self.send_status("final", "Starting final summary compilation...", None);
+            let response = finalizer_node.process(state.clone(), &self.config, "one").await?;
+            self.send_status("final", "Completed final summary compilation", None);
+
+            let mut final_state = state.lock().await;
+            final_state.set_final_summary(response.clone());
+            drop(final_state);
             
-            if let Some(groq_api_key) = &self.config.groq_api_key {
-                let groq = GroqClient::new(groq_api_key.clone());
-                let perspectives = generate_debate_perspectives(&input.research_topic, &groq, &self.config.groq_model).await?;
-                
-                let mut state_lock = state.lock().await;
-                state_lock.set_debate_perspectives(perspectives.clone());
-                drop(state_lock);
-
-                self.send_status_with_perspectives("init", "Generated debate perspectives", Some(perspectives.clone()));
-
-                // Process both tracks in parallel using tokio::join!
-                let track_one_future = self.process_track(state.clone(), "one");
-                let track_two_future = self.process_track(state.clone(), "two");
-
-                let (track_one_result, track_two_result) = tokio::join!(track_one_future, track_two_future);
-
-                // Check results from both tracks
-                track_one_result?;
-                track_two_result?;
-
-                // Generate final summary combining both perspectives
-                let finalizer_node = &self.nodes[4];
-                self.send_status_with_track("final", "Starting final summary compilation...", None, None);
-                let response = finalizer_node.process(state.clone(), &self.config, "one").await?;
-                self.send_status_with_track("final", "Completed final summary compilation", Some(response.clone()), None);
-
-                let mut final_state = state.lock().await;
-                final_state.set_final_summary(response);
-                let summary = final_state.final_summary.clone().unwrap_or_default();
-                drop(final_state);
-                
-                self.send_status_with_track("complete", &summary, None, None);
-                
-                Ok(SummaryStateOutput {
-                    running_summary: summary,
-                })
-            } else {
-                Err(anyhow::anyhow!("Groq API key not found"))
-            }
+            self.send_status("complete", &response, None);
+            
+            Ok(SummaryStateOutput {
+                running_summary: response,
+            })
         } else {
             // Original single-track research process
             let track = "one";
@@ -377,7 +377,7 @@ impl ResearchGraph {
             let final_state = state.lock().await;
             let summary = final_state.track_one.running_summary.clone();
             
-            self.send_status_with_track("complete", &summary, None, None);
+            self.send_status("complete", &summary, None);
             
             Ok(SummaryStateOutput {
                 running_summary: summary,
@@ -502,9 +502,5 @@ impl ResearchGraph {
         } else {
             eprintln!("No status sender available for update: phase={}, message={}, track={:?}", phase, message, track);
         }
-    }
-
-    fn send_status_with_perspectives(&self, phase: &str, message: &str, perspectives: Option<DebatePerspectives>) {
-        self.send_status(phase, message, perspectives);
     }
 } 
