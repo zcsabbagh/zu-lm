@@ -186,9 +186,10 @@ async fn handle_research(
         },
         Err(e) => {
             eprintln!("Research error: {:?}", e);
+            let error_message = e.to_string();
             let _ = state.status_tx.send(StatusUpdate {
                 phase: "error".to_string(),
-                message: format!("Error: {}", e),
+                message: format!("Error: {}", error_message),
                 elapsed_time: 0.0,
                 timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
                 chain_of_thought: None,
@@ -197,7 +198,7 @@ async fn handle_research(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ResearchResponse { 
-                    summary: format!("Error: {}", e),
+                    summary: format!("Error: {}", error_message),
                     status: "Error occurred".to_string(),
                 })
             ).into_response()

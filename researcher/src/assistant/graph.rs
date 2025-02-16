@@ -9,6 +9,7 @@ use tokio::sync::broadcast::Sender;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
 use std::time::Duration;
+use std::fmt::Display;
 
 use super::configuration::Configuration;
 use super::prompts::{
@@ -16,10 +17,11 @@ use super::prompts::{
     format_reflection_instructions,
     SUMMARIZER_INSTRUCTIONS,
 };
-use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput, StatusUpdate};
+use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput, StatusUpdate, ResearchTrack};
 use super::utils::{perplexity_search, format_sources};
 use super::groq::GroqClient;
 use super::configuration::ResearchMode;
+use super::debate::{generate_debate_perspectives, DebatePerspectives};
 
 #[async_trait]
 pub trait Node: Send + Sync {
@@ -324,57 +326,77 @@ impl ResearchGraph {
             input.research_topic.clone(),
         )));
 
-        // Initial query generation
-        let query_node = &self.nodes[0];
-        self.send_status("query", "Starting initial query generation...", None);
-        let response = query_node.process(state.clone(), &self.config).await?;
-        self.send_status("query", "Completed initial query generation", Some(response.clone()));
+        if let ResearchMode::Remote = self.config.research_mode {
+            // Generate debate perspectives first
+            self.send_status_with_track("init", "Generating debate perspectives...", None, None);
+            
+            if let Some(groq_api_key) = &self.config.groq_api_key {
+                let groq = GroqClient::new(groq_api_key.clone());
+                let perspectives = generate_debate_perspectives(&input.research_topic, &groq, &self.config.groq_model).await?;
+                
+                let mut state_lock = state.lock().await;
+                state_lock.set_debate_perspectives(perspectives.clone());
+                drop(state_lock);
 
-        // Main research loop
-        for loop_count in 0..self.config.max_web_research_loops {
-            self.send_status("loop", &format!("Starting research loop {} of {}", loop_count + 1, self.config.max_web_research_loops), None);
+                let status = StatusUpdate {
+                    phase: "init".to_string(),
+                    message: "Generated debate perspectives".to_string(),
+                    elapsed_time: 0.0,
+                    timestamp: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs(),
+                    chain_of_thought: None,
+                    track: None,
+                    perspectives: Some(perspectives.clone()),
+                };
 
-            // Web research
-            let research_node = &self.nodes[1];
-            self.send_status("research", &format!("Starting web research for loop {}...", loop_count + 1), None);
-            let response = research_node.process(state.clone(), &self.config).await?;
-            self.send_status("research", &format!("Completed web research for loop {}", loop_count + 1), Some(response.clone()));
+                if let Some(tx) = &self.status_tx {
+                    tx.send(status).map_err(|e| anyhow::anyhow!("Failed to send status: {}", e))?;
+                }
 
-            // Summarization
-            let summary_node = &self.nodes[2];
-            self.send_status("summary", &format!("Starting summary for loop {}...", loop_count + 1), None);
-            let response = summary_node.process(state.clone(), &self.config).await?;
-            self.send_status("summary", &format!("Completed summary for loop {}", loop_count + 1), Some(response.clone()));
+                // Process both tracks in parallel
+                let (track_one, track_two) = tokio::join!(
+                    self.process_track(state.clone(), "one"),
+                    self.process_track(state.clone(), "two")
+                );
 
-            // Skip reflection and query generation on the last loop
-            if loop_count < self.config.max_web_research_loops - 1 {
-                // Reflection and next query generation
-                let reflection_node = &self.nodes[3];
-                self.send_status("reflection", &format!("Starting reflection for loop {}...", loop_count + 1), None);
-                let response = reflection_node.process(state.clone(), &self.config).await?;
-                self.send_status("reflection", &format!("Completed reflection for loop {}", loop_count + 1), Some(response.clone()));
+                track_one?;
+                track_two?;
+
+                // Generate final summary combining both perspectives
+                let finalizer_node = &self.nodes[4];
+                self.send_status_with_track("final", "Starting final summary compilation...", None, None);
+                let response = finalizer_node.process(state.clone(), &self.config).await?;
+                self.send_status_with_track("final", "Completed final summary compilation", Some(response.clone()), None);
+
+                let mut final_state = state.lock().await;
+                final_state.set_final_summary(response);
+                let summary = final_state.final_summary.clone().unwrap_or_default();
+                drop(final_state);
+                
+                self.send_status_with_track("complete", &summary, None, None);
+                
+                Ok(SummaryStateOutput {
+                    running_summary: summary,
+                })
+            } else {
+                Err(anyhow::anyhow!("Groq API key not found"))
             }
+        } else {
+            // Original single-track research process
+            let track = "one";
+            self.process_track(state.clone(), track).await?;
 
-            // Small delay between loops to ensure status updates are received in order
-            tokio::time::sleep(Duration::from_millis(100)).await;
+            let final_state = state.lock().await;
+            let summary = final_state.track_one.running_summary.clone();
+            
+            self.send_status_with_track("complete", &summary, None, None);
+            
+            Ok(SummaryStateOutput {
+                running_summary: summary,
+            })
         }
-
-        // Final summary compilation
-        let finalizer_node = &self.nodes[4];
-        self.send_status("final", "Starting final summary compilation...", None);
-        let response = finalizer_node.process(state.clone(), &self.config).await?;
-        self.send_status("final", "Completed final summary compilation", Some(response.clone()));
-
-        let final_state = state.lock().await;
-        let summary = final_state.running_summary.clone().unwrap_or_default();
-        
-        // Send final status update with the actual summary content
-        self.send_status("complete", &summary, Some(format!("Research completed after {} loops. Final summary length: {} chars", 
-            self.config.max_web_research_loops, summary.len())));
-        
-        Ok(SummaryStateOutput {
-            running_summary: summary,
-        })
     }
 
     pub fn update_research_mode(&mut self, mode: ResearchMode) {
@@ -390,5 +412,124 @@ impl ResearchGraph {
 
     pub fn get_groq_model(&self) -> &str {
         &self.config.groq_model
+    }
+
+    async fn process_track(&self, state: Arc<Mutex<SummaryState>>, track: &str) -> Result<()> {
+        // Initial query generation
+        let query_node = &self.nodes[0];
+        self.send_status_with_track("query", &format!("Starting initial query generation for track {}...", track), None, Some(track));
+        let response = query_node.process(state.clone(), &self.config).await?;
+        
+        {
+            let mut state_lock = state.lock().await;
+            state_lock.set_search_query(track, response.clone());
+        }
+        
+        self.send_status_with_track("query", &format!("Completed initial query generation for track {}", track), Some(response), Some(track));
+
+        // Main research loop
+        for loop_count in 0..self.config.max_web_research_loops {
+            self.send_status_with_track("loop", &format!("Starting research loop {} of {} for track {}", loop_count + 1, self.config.max_web_research_loops, track), None, Some(track));
+
+            // Web research
+            let research_node = &self.nodes[1];
+            self.send_status_with_track("research", &format!("Starting web research for loop {} on track {}...", loop_count + 1, track), None, Some(track));
+            let response = research_node.process(state.clone(), &self.config).await?;
+            
+            {
+                let mut state_lock = state.lock().await;
+                state_lock.add_web_research_result(track, response.clone());
+            }
+            
+            self.send_status_with_track("research", &format!("Completed web research for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
+
+            // Summarization
+            let summary_node = &self.nodes[2];
+            self.send_status_with_track("summary", &format!("Starting summary for loop {} on track {}...", loop_count + 1, track), None, Some(track));
+            let response = summary_node.process(state.clone(), &self.config).await?;
+            
+            {
+                let mut state_lock = state.lock().await;
+                state_lock.set_running_summary(track, response.clone());
+            }
+            
+            self.send_status_with_track("summary", &format!("Completed summary for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
+
+            // Skip reflection and query generation on the last loop
+            if loop_count < self.config.max_web_research_loops - 1 {
+                // Reflection and next query generation
+                let reflection_node = &self.nodes[3];
+                self.send_status_with_track("reflection", &format!("Starting reflection for loop {} on track {}...", loop_count + 1, track), None, Some(track));
+                let response = reflection_node.process(state.clone(), &self.config).await?;
+                
+                {
+                    let mut state_lock = state.lock().await;
+                    state_lock.increment_loop_count(track);
+                }
+                
+                self.send_status_with_track("reflection", &format!("Completed reflection for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
+            }
+
+            // Small delay between loops to ensure status updates are received in order
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        Ok(())
+    }
+
+    fn send_status_with_track(&self, phase: &str, message: &str, chain_of_thought: Option<String>, track: Option<&str>) {
+        if let Some(tx) = &self.status_tx {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let status = StatusUpdate {
+                phase: phase.to_string(),
+                message: message.to_string(),
+                elapsed_time: 0.0,
+                timestamp: now,
+                chain_of_thought,
+                track: track.map(|t| t.to_string()),
+                perspectives: None,
+            };
+
+            match tx.send(status) {
+                Ok(_) => println!("Sent status update: phase={}, message={}, track={:?}", phase, message, track),
+                Err(e) => {
+                    eprintln!("Failed to send status update: {} (phase={}, message={}, track={:?})", e, phase, message, track);
+                }
+            }
+        } else {
+            eprintln!("No status sender available for update: phase={}, message={}, track={:?}", phase, message, track);
+        }
+    }
+
+    fn send_status(&self, phase: &str, message: &str, perspectives: Option<DebatePerspectives>) {
+        if let Some(tx) = &self.status_tx {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let status = StatusUpdate {
+                phase: phase.to_string(),
+                message: message.to_string(),
+                elapsed_time: 0.0,
+                timestamp: now,
+                chain_of_thought: None,
+                track: None,
+                perspectives,
+            };
+
+            match tx.send(status) {
+                Ok(_) => println!("Sent status update: phase={}, message={}", phase, message),
+                Err(e) => {
+                    eprintln!("Failed to send status update: {} (phase={}, message={})", e, phase, message);
+                }
+            }
+        } else {
+            eprintln!("No status sender available for update: phase={}, message={}", phase, message);
+        }
     }
 } 
