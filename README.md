@@ -49,7 +49,6 @@ Some features can be configured through environment variables:
 
 ## Security Notice
 
-⚠️ **IMPORTANT**: Never commit your actual API keys to the repository. The .env files containing your keys are automatically ignored by git.
 
 To run the frontend server:
 
