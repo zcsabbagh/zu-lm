@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { EnrichmentPopup } from './EnrichmentPopup';
 
 interface PodcastPlayerProps {
   content: string;
@@ -23,6 +24,8 @@ export function PodcastPlayer({
   const [duration, setDuration] = useState("00:00:00");
   const [isPlaying, setIsPlaying] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [selectedText, setSelectedText] = useState('');
+  const [showEnrichment, setShowEnrichment] = useState(false);
 
   useEffect(() => {
     const audio = audioRef.current;
@@ -126,8 +129,43 @@ export function PodcastPlayer({
     }
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'e') {
+        e.preventDefault();
+        if (showEnrichment) {
+          setShowEnrichment(false);
+          setSelectedText('');
+          // Clear text selection
+          window.getSelection()?.removeAllRanges();
+          // Remove the sidebar class from podcast content
+          const mainContent = document.querySelector('.podcast-content');
+          if (mainContent) {
+            mainContent.classList.remove('with-sidebar');
+          }
+        } else {
+          const selection = window.getSelection();
+          if (selection && selection.toString().trim().length > 0) {
+            setSelectedText(selection.toString().trim());
+            setShowEnrichment(true);
+            // Add the sidebar class to podcast content
+            const mainContent = document.querySelector('.podcast-content');
+            if (mainContent) {
+              mainContent.classList.add('with-sidebar');
+            }
+          }
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [showEnrichment]);
+
   return (
-    <div className="w-full bg-zinc-900 rounded-lg overflow-hidden p-6 text-white">
+    <div className="w-full bg-zinc-900 rounded-lg overflow-hidden p-6 text-white podcast-content transition-all duration-300 ease-in-out">
       <div className="flex gap-6">
         {/* Left side - Image */}
         <div className="w-64 h-64 flex-shrink-0">
@@ -176,7 +214,20 @@ export function PodcastPlayer({
 
           <h1 className="text-2xl font-bold">AI Research Discussion</h1>
           
-          <p className="text-lg text-zinc-300">{content}</p>
+          <div className="relative">
+            <p className="text-lg text-zinc-300 select-text">
+              {content}
+            </p>
+            {showEnrichment && selectedText && (
+              <EnrichmentPopup
+                selectedText={selectedText}
+                onClose={() => {
+                  setShowEnrichment(false);
+                  setSelectedText('');
+                }}
+              />
+            )}
+          </div>
 
           {/* Audio controls */}
           <div className="space-y-4">
@@ -235,6 +286,18 @@ export function PodcastPlayer({
           </div>
         </div>
       </div>
+
+      <style jsx global>{`
+        .podcast-content {
+          position: relative;
+          transition: all 0.3s ease-in-out;
+          padding-right: 0;
+        }
+        
+        .podcast-content.with-sidebar {
+          padding-right: 380px;
+        }
+      `}</style>
     </div>
   );
 } 
