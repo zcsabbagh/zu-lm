@@ -18,6 +18,7 @@ use crate::assistant::{
     configuration::Configuration,
     state::{SummaryStateInput, StatusUpdate},
     graph::ResearchGraph,
+    configuration::ResearchMode,
 };
 use tower_http::cors::CorsLayer;
 use futures::stream::Stream;
@@ -50,6 +51,7 @@ pub struct AppState {
 struct ConfigUpdate {
     local_llm: Option<String>,
     max_web_research_loops: Option<i32>,
+    research_mode: Option<ResearchMode>,
 }
 
 #[derive(serde::Deserialize)]
@@ -90,6 +92,8 @@ impl From<anyhow::Error> for ApiError {
 struct ConfigResponse {
     local_llm: String,
     max_web_research_loops: i32,
+    research_mode: ResearchMode,
+    groq_model: String,
 }
 
 pub async fn run_server(config: Configuration) {
@@ -276,6 +280,11 @@ async fn update_config(
         println!("Updating max loops to: {}", loops);
         graph.update_max_loops(loops);
     }
+
+    if let Some(mode) = update.research_mode {
+        println!("Updating research mode to: {:?}", mode);
+        graph.update_research_mode(mode);
+    }
     
     (
         StatusCode::OK,
@@ -297,6 +306,8 @@ async fn get_config(
         Json(ConfigResponse {
             local_llm: graph.get_llm_model().to_string(),
             max_web_research_loops: graph.get_max_loops(),
+            research_mode: graph.get_research_mode(),
+            groq_model: graph.get_groq_model().to_string(),
         })
     )
 } 
