@@ -249,25 +249,30 @@ export default function ResearchPage() {
         });
 
         if (!response.ok) {
-            const errorData = await response.json().catch(() => ({ error: 'Research request failed' }));
-            throw new Error(errorData.error || 'Research request failed');
+            let errorMessage = 'Research request failed';
+            try {
+                const errorData = await response.json();
+                if (errorData && typeof errorData.error === 'string') {
+                    errorMessage = errorData.error;
+                }
+            } catch (parseError) {
+                console.error('Error parsing error response:', parseError);
+            }
+            throw new Error(errorMessage);
         }
 
-        const data = await response.json();
-        if (data.error) {
-            throw new Error(data.error);
-        }
+        // Only try to parse response if we need it
+        // const data = await response.json();
+        // No need to do anything with the response as we'll get updates via SSE
     } catch (error) {
         console.error('Research error:', error);
         setIsLoading(false);
-        const errorMessage = error instanceof Error ? error.message : 'Failed to start research';
-        setStatus(`Error: ${errorMessage}`);
+        setStatus(error instanceof Error ? error.message : 'Failed to start research');
         setStatusHistory(prev => [...prev, {
             phase: 'error',
-            message: errorMessage,
+            message: error instanceof Error ? error.message : 'Failed to start research',
             timestamp: Date.now() / 1000,
         }]);
-
         if (statusSource) {
             statusSource.close();
             setStatusSource(null);
