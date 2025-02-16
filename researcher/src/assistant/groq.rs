@@ -23,21 +23,34 @@ impl GroqClient {
                 "model": model,
                 "messages": [
                     {
+                        "role": "system",
+                        "content": "You are a helpful research assistant. Provide clear, accurate, and well-structured responses."
+                    },
+                    {
                         "role": "user",
                         "content": prompt
                     }
                 ],
                 "temperature": 0.7,
-                "max_tokens": 1024
+                "max_tokens": 2048
             }))
             .send()
             .await?;
 
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            return Err(anyhow::anyhow!("Groq API error: {}", error_text));
+        }
+
         let data = response.json::<serde_json::Value>().await?;
         
-        Ok(data["choices"][0]["message"]["content"]
-            .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Failed to get content from response"))?
-            .to_string())
+        let content = data.get("choices")
+            .and_then(|choices| choices.get(0))
+            .and_then(|choice| choice.get("message"))
+            .and_then(|message| message.get("content"))
+            .and_then(|content| content.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Invalid response structure from Groq API"))?;
+
+        Ok(content.to_string())
     }
 } 
