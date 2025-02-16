@@ -1,0 +1,11 @@
+h1 {
+  @apply scroll-m-20 text-4xl font-extrabold tracking-tight;
+}
+
+h2 {
+  @apply scroll-m-20 pb-2 text-2xl font-semibold tracking-tight first:mt-0;
+}
+
+h3 {
+  @apply scroll-m-20 text-xl font-semibold tracking-tight;
+}

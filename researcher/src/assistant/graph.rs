@@ -23,6 +23,13 @@ use super::groq::GroqClient;
 use super::configuration::ResearchMode;
 use super::debate::{generate_debate_perspectives, DebatePerspectives};
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ResearchSource {
+    title: String,
+    url: String,
+    content: String,
+}
+
 #[async_trait]
 pub trait Node: Send + Sync {
     async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration, track: &str) -> Result<String>;
@@ -90,24 +97,41 @@ impl Node for WebResearchNode {
         
         let search_results = perplexity_search(&query, loop_count).await?;
         
-        // Extract and store sources
+        // Convert search results to structured sources
+        let sources: Vec<ResearchSource> = search_results.results.iter()
+            .map(|result| ResearchSource {
+                title: result.title.clone(),
+                url: result.url.clone(),
+                content: result.content.clone(),
+            })
+            .collect();
+        
+        // Store sources in state
         {
             let mut state_lock = state.lock().await;
-            for result in &search_results.results {
-                state_lock.add_source(track, format!("- {} ({})", result.title, result.url));
+            for source in &sources {
+                state_lock.add_source(track, format!("- {} ({})", source.title, source.url));
             }
         }
         
-        // Format and store the search results with content
-        let formatted_results = search_results.results.iter()
-            .map(|result| format!("Source: {}\nURL: {}\nContent: {}\n", 
-                result.title, result.url, result.content))
-            .collect::<Vec<String>>()
-            .join("\n---\n");
+        // Format results as JSON with structured content and sources
+        let results_json = serde_json::json!({
+            "content": sources.iter()
+                .map(|source| format!("Source: {}\nURL: {}\nContent: {}\n", 
+                    source.title, source.url, source.content))
+                .collect::<Vec<String>>()
+                .join("\n---\n"),
+            "sources": sources,
+        });
+        
+        let formatted_results = results_json.to_string();
         
         {
             let mut state_lock = state.lock().await;
-            state_lock.add_web_research_result(track, formatted_results.clone());
+            // Store just the content portion in web_research_results
+            if let Some(content) = results_json["content"].as_str() {
+                state_lock.add_web_research_result(track, content.to_string());
+            }
         }
         
         Ok(formatted_results)
@@ -125,6 +149,21 @@ impl Node for SummarizerNode {
             )
         };
         
+        // Parse the last web research result as JSON to get content and sources
+        let last_research = track_state.web_research_results.last()
+            .cloned()
+            .unwrap_or_default();
+        
+        let (research_content, sources) = if let Ok(json) = serde_json::from_str::<Value>(&last_research) {
+            let content = json["content"].as_str().unwrap_or(&last_research).to_string();
+            let sources = json["sources"].as_array()
+                .and_then(|arr| serde_json::from_value::<Vec<ResearchSource>>(Value::Array(arr.clone())).ok())
+                .unwrap_or_default();
+            (content, sources)
+        } else {
+            (last_research, Vec::new())
+        };
+        
         let human_message = if !track_state.running_summary.is_empty() {
             format!(
                 "<User Input> \n {} \n </User Input>\n\n\
@@ -132,14 +171,14 @@ impl Node for SummarizerNode {
                 <New Search Results> \n {} \n </New Search Results>",
                 research_topic,
                 track_state.running_summary,
-                track_state.web_research_results.last().cloned().unwrap_or_default()
+                research_content
             )
         } else {
             format!(
                 "<User Input> \n {} \n </User Input>\n\n\
                 <Search Results> \n {} \n </Search Results>",
                 research_topic,
-                track_state.web_research_results.last().cloned().unwrap_or_default()
+                research_content
             )
         };
 
@@ -172,13 +211,19 @@ impl Node for SummarizerNode {
             summary = format!("{}{}", &summary[..start], &summary[end + 8..]);
         }
         
+        // Create JSON response with summary and structured sources
+        let summary_json = serde_json::json!({
+            "summary": summary.clone(),
+            "sources": sources,
+        });
+        
         // Update the running summary in the state
         {
             let mut state_lock = state.lock().await;
-            state_lock.set_running_summary(track, summary.clone());
+            state_lock.set_running_summary(track, summary);
         }
         
-        Ok(summary)
+        Ok(summary_json.to_string())
     }
 }
 
