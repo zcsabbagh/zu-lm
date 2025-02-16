@@ -2,6 +2,7 @@ import { createObject } from '@/lib/text';
 import { getPodcastPrompt } from '@/lib/schemas';
 import { ElevenLabsClient } from "elevenlabs";
 import { Readable } from 'stream';
+import { generateImage } from '@/lib/luma';
 
 interface PodcastSegment {
   speaker: "Speaker 1" | "Speaker 2";
@@ -12,6 +13,9 @@ const VOICE_IDS = {
   "Speaker 1": "JBFqnCBsd6RMkjVDRZzb",
   "Speaker 2": "ZF6FPAbjXT4488VcRRnw"
 } as const;
+
+// Track ongoing image generations
+const imageGenerationProgress = new Map<string, string>();
 
 // Helper function to convert stream to buffer
 async function streamToBuffer(stream: Readable): Promise<Buffer> {
@@ -53,9 +57,48 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
         throw new Error('Invalid podcast transcript format - expected array');
       }
 
+      // Start generating first image immediately
+      const firstImagePromise = (async () => {
+        try {
+          console.log(`Generating first image for segment:`, podcast_transcript[0]);
+          const imageUrl = await generateImage(podcast_transcript[0].text);
+          return {
+            speaker: podcast_transcript[0].speaker,
+            imageUrl
+          };
+        } catch (error) {
+          console.error(`Error generating first image:`, error);
+          return {
+            speaker: podcast_transcript[0].speaker,
+            imageUrl: null,
+            error: error instanceof Error ? error.message : 'Unknown error'
+          };
+        }
+      })();
+
+      // Start background processing for remaining images
+      if (podcast_transcript.length > 1) {
+        const remainingSegments = podcast_transcript.slice(1);
+        (async () => {
+          for (const segment of remainingSegments) {
+            try {
+              console.log(`Generating image for segment in background:`, segment);
+              const imageUrl = await generateImage(segment.text);
+              imageGenerationProgress.set(segment.speaker, imageUrl);
+            } catch (error) {
+              console.error(`Error generating image for segment:`, error);
+              imageGenerationProgress.set(
+                segment.speaker, 
+                `error:${error instanceof Error ? error.message : 'Unknown error'}`
+              );
+            }
+          }
+        })();
+      }
+
       // Generate all audio segments in parallel
       const audioPromises = podcast_transcript.map(async (segment) => {
-        console.log(`Preparing segment:`, segment);
+        console.log(`Preparing audio for segment:`, segment);
         const voiceId = VOICE_IDS[segment.speaker];
         if (!voiceId) {
           console.error('Invalid speaker:', segment.speaker);
@@ -63,7 +106,6 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
         }
         
         try {
-          // Use the ElevenLabs client to get the audio stream
           const audioStream = await client.textToSpeech.convert(voiceId, {
             text: segment.text,
             model_id: "eleven_multilingual_v2",
@@ -74,10 +116,7 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
             output_format: "mp3_44100_128",
           });
 
-          // Convert the stream to a buffer
           const audioBuffer = await streamToBuffer(audioStream as unknown as Readable);
-          
-          // Convert the buffer to base64
           return audioBuffer.toString('base64');
         } catch (error: unknown) {
           console.error(`Error generating audio for segment:`, error);
@@ -85,17 +124,23 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
         }
       });
 
-      // Wait for all audio segments to complete
-      const audioSegments = await Promise.all(audioPromises);
-      console.log(`Successfully generated ${audioSegments.length} audio segments`);
+      // Wait for first image and all audio segments to complete
+      const [firstImage, ...audioSegments] = await Promise.all([
+        firstImagePromise,
+        ...audioPromises
+      ]);
       
-      // Send the audio segments and transcript as response
+      console.log(`Successfully generated ${audioSegments.length} audio segments and first image`);
+      
+      // Send the audio segments, first image, and transcript as response
       await writer.write(encoder.encode(JSON.stringify({
         audioSegments,
+        images: [firstImage],
+        remainingImageSegments: podcast_transcript.slice(1).map(s => s.speaker),
         transcript: podcast_transcript,
       })));
     } catch (error: unknown) {
-      console.error('Error generating podcast:', error);
+      console.error('Error in generation:', error);
       console.error('Error details:', error instanceof Error ? error.message : String(error));
       await writer.write(encoder.encode(JSON.stringify({ 
         error: error instanceof Error ? error.message : 'Failed to generate podcast'
@@ -110,4 +155,23 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
       'Content-Type': 'application/json',
     },
   });
+}
+
+// Endpoint to check progress of remaining images
+export async function GET(req: Request) {
+  const results = Array.from(imageGenerationProgress.entries()).map(([speaker, result]) => {
+    if (result.startsWith('error:')) {
+      return {
+        speaker,
+        imageUrl: null,
+        error: result.substring(6)
+      };
+    }
+    return {
+      speaker,
+      imageUrl: result
+    };
+  });
+
+  return Response.json({ images: results });
 } 
