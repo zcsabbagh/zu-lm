@@ -25,7 +25,7 @@ export function ResearchInputNode({ data }: ResearchInputNodeProps) {
           type="text"
           //   value={data.value}
           //   onChange={(e) => data.onChange(e.target.value)}
-          placeholder="Enter research topic..."
+          placeholder="Steer topic..."
           ref={inputRef}
         />
         <Button onClick={() => data.onSubmit(inputRef.current?.value || "")} className="w-full">

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { ReactFlow, Node, Edge, Background, Controls, MiniMap } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import { Button } from "./ui/button";
@@ -29,6 +29,7 @@ const nodeTypes = {
 
 export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProps) {
   const [researchTopic, setResearchTopic] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
@@ -286,6 +287,29 @@ export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProp
                   {combinedThoughts}
                 </div>
               )}
+              {group[0].phase === "complete" && (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs whitespace-pre-wrap pt-4 px-4 font-sans bg-white/40 flex gap-2 ">
+                    <Input
+                      className="no-drag mb-2"
+                      type="text"
+                      //   value={data.value}
+                      //   onChange={(e) => data.onChange(e.target.value)}
+                      placeholder="Steer topic..."
+                      ref={inputRef}
+                    />
+                    <Button
+                      onClick={() =>
+                        handleResearch(
+                          statusHistory[0].perspectives?.topic + " " + inputRef.current?.value
+                        )
+                      }
+                    >
+                      Research
+                    </Button>
+                  </div>
+                </div>
+              )}
             </div>
           ),
         },
@@ -318,11 +342,11 @@ export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProp
       //   let contentHeight = measureContent(
       //     `<div class="font-semibold text-sm">${group[0].phase}</div>`
       //   );
-      let contentHeight = measureContent(
+      const contentHeight = measureContent(
         `<div class="text-xs whitespace-pre-wrap">${combinedMessage}</div>`
       );
       console.log("contentHeight", contentHeight);
-      y += contentHeight + 30;
+      y += contentHeight + 50;
 
       console.log("final node", id);
       console.log("lastTrackOneId", lastTrackOneId);
@@ -363,25 +387,6 @@ export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProp
         }
       }
     });
-    if (completeNodeId) {
-      const continueSteeringId = `node-continue-steering-${crypto.randomUUID()}`;
-      nodes.push({
-        id: continueSteeringId,
-        type: "researchInput",
-        position: { x: 400, y: y },
-        data: {
-          value: researchTopic,
-          onChange: setResearchTopic,
-          onSubmit: (newTopic: string) =>
-            handleResearch(statusHistory[0].perspectives?.topic + " " + newTopic),
-        },
-      });
-      edges.push({
-        id: `edge-${completeNodeId}-${continueSteeringId}`,
-        source: completeNodeId,
-        target: continueSteeringId,
-      });
-    }
 
     // Clean up the measurement div
     document.body.removeChild(measureDiv);
