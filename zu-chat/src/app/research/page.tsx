@@ -72,18 +72,19 @@ const SourceList = ({ sources, title }: SourceListProps) => {
       <h3 className="font-semibold text-lg">{title}</h3>
       <div className="space-y-2">
         {sources.map((source, index) => {
-          const faviconUrl = source.url !== '#' 
-            ? `https://www.google.com/s2/favicons?domain=${source.domain}&sz=32`
-            : '/default-favicon.png'; // You'll need to add this default image to your public folder
-          
+          const faviconUrl =
+            source.url !== "#"
+              ? `https://www.google.com/s2/favicons?domain=${source.domain}&sz=32`
+              : "/default-favicon.png"; // You'll need to add this default image to your public folder
+
           return (
-            <a 
+            <a
               key={index}
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
-              className={`block ${source.url === '#' ? 'cursor-not-allowed' : ''}`}
-              onClick={source.url === '#' ? (e) => e.preventDefault() : undefined}
+              className={`block ${source.url === "#" ? "cursor-not-allowed" : ""}`}
+              onClick={source.url === "#" ? (e) => e.preventDefault() : undefined}
             >
               <div className="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
                 <div className="flex items-center space-x-3 flex-1">
@@ -91,20 +92,22 @@ const SourceList = ({ sources, title }: SourceListProps) => {
                   <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded overflow-hidden">
                     <Image
                       src={faviconUrl}
-                      alt={source.domain || 'favicon'}
+                      alt={source.domain || "favicon"}
                       width={32}
                       height={32}
                       className="rounded"
                       onError={(e) => {
                         // Fallback to default image on error
                         const imgElement = e.target as HTMLImageElement;
-                        imgElement.src = '/default-favicon.png';
+                        imgElement.src = "/default-favicon.png";
                       }}
                     />
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-900 truncate">{source.title}</p>
-                    <p className="text-sm text-gray-500 truncate">{source.domain || 'Unknown source'}</p>
+                    <p className="text-sm text-gray-500 truncate">
+                      {source.domain || "Unknown source"}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -318,9 +321,7 @@ export default function ResearchPage() {
     return eventSource;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
+  const handleResearch = async (topic: string) => {
     setSummary("");
     setStatus("Starting research...");
     setCurrentLoop(0);
@@ -376,6 +377,12 @@ export default function ResearchPage() {
         setStatusSource(null);
       }
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+    await handleResearch(topic);
   };
 
   const handleCreatePodcast = () => {
@@ -456,8 +463,9 @@ export default function ResearchPage() {
 
   // Update the source parsing function
   const parseSourcesFromText = (sourcesText: string): ResearchSource[] => {
-    const sourceLines = sourcesText.split('\n')
-      .filter(line => line.trim())
+    const sourceLines = sourcesText
+      .split("\n")
+      .filter((line) => line.trim())
       .filter((line, index, self) => {
         // Remove duplicates by checking if this is the first occurrence of the line
         return self.indexOf(line) === index;
@@ -472,32 +480,32 @@ export default function ResearchPage() {
           return {
             title: `Source ${index + 1}`,
             url,
-            content: '',
+            content: "",
             sourceNumber: index + 1,
-            domain
+            domain,
           };
         } catch (e) {
           return {
             title: `Source ${index + 1}`,
-            url: '#',
-            content: '',
+            url: "#",
+            content: "",
             sourceNumber: index + 1,
-            domain: 'Invalid URL'
+            domain: "Invalid URL",
           };
         }
       }
       return {
         title: `Source ${index + 1}`,
-        url: '#',
-        content: '',
+        url: "#",
+        content: "",
         sourceNumber: index + 1,
-        domain: 'Unknown source'
+        domain: "Unknown source",
       };
     });
   };
 
   return (
-    <div className="container mx-auto px-4 py-16">
+    <div className="container mx-auto px-4 py-24">
       <div className="mb-6">
         <h1 className="text-5xl font-bold font-mono">Zue Research</h1>
         <div className="mt-8 mb-4 p-4 bg-white rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
@@ -603,7 +611,7 @@ export default function ResearchPage() {
 
           {/* Replace the grid view with ResearchFlow */}
           <div className="border rounded-lg p-4">
-            <ResearchFlow statusHistory={statusHistory} />
+            <ResearchFlow handleResearch={handleResearch} statusHistory={statusHistory} />
           </div>
         </div>
       )}
@@ -619,9 +627,15 @@ export default function ResearchPage() {
             <CardContent>
               <div className="prose max-w-none">
                 {(() => {
-                  const trackOneMatch = summary.match(/### Track One\n([\s\S]*?)(?=\n### Track One Sources:)/);
-                  const trackTwoMatch = summary.match(/### Track Two\n([\s\S]*?)(?=\n### Track Two Sources:)/);
-                  const trackOneSourcesMatch = summary.match(/### Track One Sources:\n([\s\S]*?)(?=\n### Track Two)/);
+                  const trackOneMatch = summary.match(
+                    /### Track One\n([\s\S]*?)(?=\n### Track One Sources:)/
+                  );
+                  const trackTwoMatch = summary.match(
+                    /### Track Two\n([\s\S]*?)(?=\n### Track Two Sources:)/
+                  );
+                  const trackOneSourcesMatch = summary.match(
+                    /### Track One Sources:\n([\s\S]*?)(?=\n### Track Two)/
+                  );
                   const trackTwoSourcesMatch = summary.match(/### Track Two Sources:\n([\s\S]*?)$/);
 
                   return (
@@ -629,12 +643,12 @@ export default function ResearchPage() {
                       {/* Extract and format track one content */}
                       <h3>Research Agent 1</h3>
                       {trackOneMatch && <ReactMarkdown>{trackOneMatch[1]}</ReactMarkdown>}
-                      
+
                       <div className="mb-4" />
                       {/* Parse and display track one sources */}
                       {trackOneSourcesMatch && (
-                        <SourceList 
-                          title="Sources" 
+                        <SourceList
+                          title="Sources"
                           sources={parseSourcesFromText(trackOneSourcesMatch[1])}
                         />
                       )}
@@ -645,8 +659,8 @@ export default function ResearchPage() {
                       <div className="mb-4" />
                       {/* Parse and display track two sources */}
                       {trackTwoSourcesMatch && (
-                        <SourceList 
-                          title="Sources" 
+                        <SourceList
+                          title="Sources"
                           sources={parseSourcesFromText(trackTwoSourcesMatch[1])}
                         />
                       )}
@@ -660,7 +674,7 @@ export default function ResearchPage() {
           <Button
             onClick={handleCreatePodcast}
             size="lg"
-            className="w-full bg-green-600 hover:bg-green-700"
+            className="w-full bg-green-600 hover:bg-green-700 font-mono"
           >
             Create Podcast from Summary
           </Button>

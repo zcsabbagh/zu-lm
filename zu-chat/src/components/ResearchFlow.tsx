@@ -1,6 +1,9 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { ReactFlow, Node, Edge, Background, Controls, MiniMap } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { ResearchInputNode } from "./ResearchInputNode";
 
 interface StatusMessage {
   phase: string;
@@ -17,9 +20,15 @@ interface StatusMessage {
 
 interface ResearchFlowProps {
   statusHistory: StatusMessage[];
+  handleResearch: (topic: string) => void;
 }
 
-export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
+const nodeTypes = {
+  researchInput: ResearchInputNode,
+};
+
+export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProps) {
+  const [researchTopic, setResearchTopic] = useState("");
   const { nodes, edges } = useMemo(() => {
     const nodes: Node[] = [];
     const edges: Edge[] = [];
@@ -104,7 +113,7 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
               <div className="font-semibold text-sm border-b rounded-t-lg border-gray-300 pt-2 pb-2 font-mono">
                 Research Perspectives
               </div>
-              <div className="text-xs py-2 bg-white rounded-b-lg font-sans">
+              <div className="text-xs py-2 bg-white/40 rounded-b-lg font-sans">
                 {firstStatus.perspectives.topic}
               </div>
             </div>
@@ -135,7 +144,7 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
       let currentY = startY;
 
       groupedStatuses.forEach((group, index) => {
-        const id = `node-${isTrackTwo ? "two" : "one"}-${index}`;
+        const id = `node-${isTrackTwo ? "two" : "one"}-${index}-${crypto.randomUUID()}`;
         const status = group[0];
         const width = status.phase === "summary" || status.phase === "query" ? 600 : 300;
         const x = isTrackTwo ? trackTwoX : trackOneX;
@@ -238,8 +247,9 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
     trackTwoY = createTrackNodes(groupedTrackTwo, true, trackTwoY);
 
     let y = Math.max(trackOneY, trackTwoY);
+    let completeNodeId;
     groupedTrackNull.forEach((group, index) => {
-      const id = `node-${group[0].phase}-${index}`;
+      const id = `node-${group[0].phase}-${index}-${crypto.randomUUID()}`;
 
       const width = group[0].phase === "complete" ? 1000 : 300;
 
@@ -305,7 +315,14 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
 
       nodes.push(node);
 
-      y += 100;
+      //   let contentHeight = measureContent(
+      //     `<div class="font-semibold text-sm">${group[0].phase}</div>`
+      //   );
+      let contentHeight = measureContent(
+        `<div class="text-xs whitespace-pre-wrap">${combinedMessage}</div>`
+      );
+      console.log("contentHeight", contentHeight);
+      y += contentHeight + 30;
 
       console.log("final node", id);
       console.log("lastTrackOneId", lastTrackOneId);
@@ -334,6 +351,7 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
         lastTrackOneId = id;
         lastTrackTwoId = id;
       } else if (group[0].phase == "complete") {
+        completeNodeId = id;
         if (lastTrackOneId && lastTrackOneId !== id) {
           edges.push({
             id: `edge-${lastTrackOneId}-${id}`,
@@ -345,6 +363,25 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
         }
       }
     });
+    if (completeNodeId) {
+      const continueSteeringId = `node-continue-steering-${crypto.randomUUID()}`;
+      nodes.push({
+        id: continueSteeringId,
+        type: "researchInput",
+        position: { x: 400, y: y },
+        data: {
+          value: researchTopic,
+          onChange: setResearchTopic,
+          onSubmit: (newTopic: string) =>
+            handleResearch(statusHistory[0].perspectives?.topic + " " + newTopic),
+        },
+      });
+      edges.push({
+        id: `edge-${completeNodeId}-${continueSteeringId}`,
+        source: completeNodeId,
+        target: continueSteeringId,
+      });
+    }
 
     // Clean up the measurement div
     document.body.removeChild(measureDiv);
@@ -357,6 +394,7 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
       <ReactFlow
         nodes={nodes}
         edges={edges}
+        nodeTypes={nodeTypes}
         fitView
         fitViewOptions={{
           padding: 0.2,
