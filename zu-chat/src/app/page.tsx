@@ -315,7 +315,7 @@ export default function Home() {
       {displayedMessages.length > 0 && (
         <div className="container mx-auto py-16">
           <Card className="p-8 mx-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-950 shadow-lg">
-            <h2 className="font-mono mb-8 pb-4 border-b dark:border-gray-800">Feynman Review</h2>
+            <h2 className="mb-8 pb-4 border-b dark:border-gray-800">Feynman Review</h2>
 
             <div className="space-y-6">
               <div className="flex items-center justify-between">

@@ -8,7 +8,7 @@ interface ResearchHeaderProps {
 export function ResearchHeader({ title }: ResearchHeaderProps) {
   return (
     <div className="flex justify-between items-center mb-6">
-      <h1 className="font-mono">{title}</h1>
+      <h1 className="font-mono text-4xl">{title}</h1>
       <Button variant="secondary" asChild>
         <Link href="/research">Research New Topic</Link>
       </Button>
