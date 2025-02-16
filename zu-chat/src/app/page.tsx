@@ -5,7 +5,6 @@ import { useChat } from 'ai/react';
 import Link from 'next/link';
 import { PodcastControls } from '@/components/podcast/PodcastControls';
 import { PodcastPlayer } from '@/components/podcast/PodcastPlayer';
-import { PodcastTest } from '@/components/podcast/PodcastTest';
 import { ResearchHeader } from '@/components/research/ResearchHeader';
 import { ResearchPerspectives } from '@/components/research/ResearchPerspectives';
 import { DEFAULT_RESEARCH_SUMMARY } from '@/lib/constants';
@@ -254,18 +253,7 @@ export default function Home() {
             }}
           />
 
-          <PodcastTest
-            onTest={() => {
-              setIsTestMode(true);
-              // Pause any playing audio
-              if (audioRef.current) {
-                audioRef.current.pause();
-              }
-              // Reset to first segment
-              setCurrentSegment(0);
-            }}
-            disabled={isGenerating || isGeneratingImages}
-          />
+            
         </div>
       )}
     </div>
