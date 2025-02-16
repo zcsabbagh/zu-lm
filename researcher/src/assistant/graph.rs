@@ -18,6 +18,8 @@ use super::prompts::{
 };
 use super::state::{SummaryState, SummaryStateInput, SummaryStateOutput, StatusUpdate};
 use super::utils::{perplexity_search, format_sources};
+use super::groq::GroqClient;
+use super::configuration::ResearchMode;
 
 #[async_trait]
 pub trait Node: Send + Sync {
@@ -38,22 +40,32 @@ impl Node for QueryGeneratorNode {
             state.research_topic.clone()
         };
         
-        println!("Initializing Ollama with model: {}", config.local_llm);
-        let ollama = Ollama::default();
-        
         let instructions = format_query_writer_instructions(&research_topic);
-        let request = GenerationRequest::new(
-            config.local_llm.clone(),
-            format!("{}\n\nEnhance this search query while preserving its core meaning. Original query: {}", 
-                instructions, research_topic),
-        );
-        
-        println!("Sending request to Ollama...");
-        let response = ollama.generate(request).await
-            .map_err(|e| anyhow::anyhow!("Ollama request failed: {}", e))?;
+        let prompt = format!("{}\n\nEnhance this search query while preserving its core meaning. Original query: {}", 
+            instructions, research_topic);
+
+        let response = match config.research_mode {
+            ResearchMode::Local => {
+                println!("Initializing Ollama with model: {}", config.local_llm);
+                let ollama = Ollama::default();
+                let request = GenerationRequest::new(config.local_llm.clone(), prompt);
+                ollama.generate(request).await
+                    .map_err(|e| anyhow::anyhow!("Ollama request failed: {}", e))?
+                    .response
+            },
+            ResearchMode::Remote => {
+                if let Some(groq_api_key) = &config.groq_api_key {
+                    println!("Using Groq with model: {}", config.groq_model);
+                    let groq = GroqClient::new(groq_api_key.clone());
+                    groq.generate(&prompt, &config.groq_model).await?
+                } else {
+                    return Err(anyhow::anyhow!("Groq API key not found"));
+                }
+            }
+        };
         
         // Try to parse as JSON, if fails, use the original topic
-        let search_query = match serde_json::from_str::<Value>(&response.response) {
+        let search_query = match serde_json::from_str::<Value>(&response) {
             Ok(json) => json["query"]
                 .as_str()
                 .unwrap_or(&research_topic)
@@ -120,15 +132,30 @@ impl Node for SummarizerNode {
                 latest_research.unwrap_or_default()
             )
         };
+
+        let response = match config.research_mode {
+            ResearchMode::Local => {
+                let ollama = Ollama::default();
+                let request = GenerationRequest::new(
+                    config.local_llm.clone(),
+                    format!("{}\n\n{}", SUMMARIZER_INSTRUCTIONS, human_message),
+                );
+                ollama.generate(request).await?.response
+            },
+            ResearchMode::Remote => {
+                if let Some(groq_api_key) = &config.groq_api_key {
+                    let groq = GroqClient::new(groq_api_key.clone());
+                    groq.generate(
+                        &format!("{}\n\n{}", SUMMARIZER_INSTRUCTIONS, human_message),
+                        &config.groq_model
+                    ).await?
+                } else {
+                    return Err(anyhow::anyhow!("Groq API key not found"));
+                }
+            }
+        };
         
-        let ollama = Ollama::default();
-        let request = GenerationRequest::new(
-            config.local_llm.clone(),
-            format!("{}\n\n{}", SUMMARIZER_INSTRUCTIONS, human_message),
-        );
-        
-        let response = ollama.generate(request).await?;
-        let mut summary = response.response.clone();
+        let mut summary = response.clone();
         
         // Remove <think> tags if present
         while let (Some(start), Some(end)) = (summary.find("<think>"), summary.find("</think>")) {
@@ -138,7 +165,7 @@ impl Node for SummarizerNode {
         let mut state = state.lock().await;
         state.set_running_summary(summary);
         
-        Ok(response.response)
+        Ok(response)
     }
 }
 
@@ -158,18 +185,33 @@ impl Node for ReflectionNode {
             "Identify a knowledge gap and generate a follow-up web search query based on our existing knowledge: {}",
             running_summary
         );
+
+        let response = match config.research_mode {
+            ResearchMode::Local => {
+                let ollama = Ollama::default();
+                let request = GenerationRequest::new(
+                    config.local_llm.clone(),
+                    format!("{}\n\n{}", instructions, human_message),
+                );
+                ollama.generate(request).await?.response
+            },
+            ResearchMode::Remote => {
+                if let Some(groq_api_key) = &config.groq_api_key {
+                    let groq = GroqClient::new(groq_api_key.clone());
+                    groq.generate(
+                        &format!("{}\n\n{}", instructions, human_message),
+                        &config.groq_model
+                    ).await?
+                } else {
+                    return Err(anyhow::anyhow!("Groq API key not found"));
+                }
+            }
+        };
         
-        let ollama = Ollama::default();
-        let request = GenerationRequest::new(
-            config.local_llm.clone(),
-            format!("{}\n\n{}", instructions, human_message),
-        );
-        
-        let response = ollama.generate(request).await?;
-        let response_text = response.response.clone();
+        let response_text = response.clone();
         
         // Try to parse as JSON, if fails, use a fallback query
-        let query = match serde_json::from_str::<Value>(&response.response) {
+        let query = match serde_json::from_str::<Value>(&response) {
             Ok(json) => json["follow_up_query"]
                 .as_str()
                 .unwrap_or(&format!("Tell me more about {}", research_topic))
@@ -333,5 +375,20 @@ impl ResearchGraph {
         Ok(SummaryStateOutput {
             running_summary: summary,
         })
+    }
+
+    pub fn update_research_mode(&mut self, mode: ResearchMode) {
+        self.config = Configuration {
+            research_mode: mode,
+            ..self.config.clone()
+        };
+    }
+
+    pub fn get_research_mode(&self) -> ResearchMode {
+        self.config.research_mode.clone()
+    }
+
+    pub fn get_groq_model(&self) -> &str {
+        &self.config.groq_model
     }
 } 

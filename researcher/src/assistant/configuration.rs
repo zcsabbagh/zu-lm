@@ -9,6 +9,20 @@ pub enum SearchAPI {
     Perplexity,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ResearchMode {
+    #[serde(rename = "local")]
+    Local,
+    #[serde(rename = "remote")]
+    Remote,
+}
+
+impl Default for ResearchMode {
+    fn default() -> Self {
+        ResearchMode::Local
+    }
+}
+
 impl Default for SearchAPI {
     fn default() -> Self {
         SearchAPI::Perplexity
@@ -24,6 +38,11 @@ pub struct Configuration {
     #[serde(default)]
     pub search_api: SearchAPI,
     pub perplexity_api_key: String,
+    #[serde(default)]
+    pub research_mode: ResearchMode,
+    pub groq_api_key: Option<String>,
+    #[serde(default = "default_groq_model")]
+    pub groq_model: String,
 }
 
 fn default_max_web_research_loops() -> i32 {
@@ -32,6 +51,10 @@ fn default_max_web_research_loops() -> i32 {
 
 fn default_local_llm() -> String {
     "deepseek-r1:8b".to_string()
+}
+
+fn default_groq_model() -> String {
+    "mixtral-8x7b-32768".to_string()
 }
 
 impl Configuration {
@@ -48,6 +71,9 @@ impl Configuration {
             "LOCAL_LLM",
             "MAX_WEB_RESEARCH_LOOPS",
             "SEARCH_API",
+            "GROQ_API_KEY",
+            "GROQ_MODEL",
+            "RESEARCH_MODE",
         ];
 
         for var in env_vars.iter() {
@@ -76,11 +102,24 @@ impl Configuration {
         // Always use Perplexity as the search API
         let search_api = SearchAPI::Perplexity;
 
+        // Get optional Groq settings
+        let groq_api_key = env::var("GROQ_API_KEY").ok();
+        let groq_model = env::var("GROQ_MODEL").unwrap_or_else(|_| default_groq_model());
+
+        // Get research mode
+        let research_mode = match env::var("RESEARCH_MODE").as_deref() {
+            Ok("remote") => ResearchMode::Remote,
+            _ => ResearchMode::Local,
+        };
+
         Ok(Configuration {
             max_web_research_loops,
             local_llm,
             search_api,
             perplexity_api_key,
+            research_mode,
+            groq_api_key,
+            groq_model,
         })
     }
 } 
