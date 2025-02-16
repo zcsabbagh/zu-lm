@@ -1,6 +1,7 @@
 import { createObject } from '@/lib/text';
 import { getPodcastPrompt } from '@/lib/schemas';
 import { ElevenLabsClient } from "elevenlabs";
+import { Readable } from 'stream';
 
 interface PodcastSegment {
   speaker: "Speaker 1" | "Speaker 2";
@@ -12,8 +13,18 @@ const VOICE_IDS = {
   "Speaker 2": "ZF6FPAbjXT4488VcRRnw"
 } as const;
 
+// Helper function to convert stream to buffer
+async function streamToBuffer(stream: Readable): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
+// Initialize the client outside the handler to reuse the connection
 const client = new ElevenLabsClient({
-  apiKey: process.env.ELEVENLABS_API_KEY,
+  apiKey: process.env.ELEVENLABS_API_KEY || '',
 });
 
 export async function POST(req: Request) {
@@ -52,36 +63,22 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
         }
         
         try {
-          // Make the API request to ElevenLabs
-          const response = await fetch(
-            `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-            {
-              method: 'POST',
-              headers: {
-                'Accept': 'audio/mpeg',
-                'Content-Type': 'application/json',
-                'xi-api-key': process.env.ELEVENLABS_API_KEY || '',
-              },
-              body: JSON.stringify({
-                text: segment.text,
-                model_id: "eleven_multilingual_v2",
-                voice_settings: {
-                  stability: 0.5,
-                  similarity_boost: 0.75,
-                },
-              }),
-            }
-          );
+          // Use the ElevenLabs client to get the audio stream
+          const audioStream = await client.textToSpeech.convert(voiceId, {
+            text: segment.text,
+            model_id: "eleven_multilingual_v2",
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.75,
+            },
+            output_format: "mp3_44100_128",
+          });
 
-          if (!response.ok) {
-            throw new Error(`ElevenLabs API error: ${response.status} ${response.statusText}`);
-          }
-
-          // Get the audio data as an ArrayBuffer
-          const audioData = await response.arrayBuffer();
+          // Convert the stream to a buffer
+          const audioBuffer = await streamToBuffer(audioStream as unknown as Readable);
           
-          // Convert to base64
-          return Buffer.from(audioData).toString('base64');
+          // Convert the buffer to base64
+          return audioBuffer.toString('base64');
         } catch (error: unknown) {
           console.error(`Error generating audio for segment:`, error);
           throw new Error(`Failed to generate audio for segment: ${error instanceof Error ? error.message : String(error)}`);
@@ -100,7 +97,9 @@ Arsenal's 2003-04 season, famously referred to as "The Invincibles," was a remar
     } catch (error: unknown) {
       console.error('Error generating podcast:', error);
       console.error('Error details:', error instanceof Error ? error.message : String(error));
-      await writer.write(encoder.encode(JSON.stringify({ error: 'Failed to generate podcast' })));
+      await writer.write(encoder.encode(JSON.stringify({ 
+        error: error instanceof Error ? error.message : 'Failed to generate podcast'
+      })));
     } finally {
       await writer.close();
     }
