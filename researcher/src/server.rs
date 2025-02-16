@@ -151,13 +151,12 @@ async fn handle_research(
     };
 
     // Send initial status update
-    if let Err(e) = state.status_tx.send(StatusUpdate {
-        phase: "init".to_string(),
-        message: format!("Starting research on topic: {}", input.research_topic),
-        elapsed_time: 0.0,
-        timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-        chain_of_thought: None,
-    }) {
+    let mut status = StatusUpdate::default();
+    status.phase = "init".to_string();
+    status.message = format!("Starting research on topic: {}", input.research_topic);
+    status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    if let Err(e) = state.status_tx.send(status) {
         eprintln!("Failed to send initial status update: {}", e);
     }
 
@@ -168,13 +167,12 @@ async fn handle_research(
     match graph.process_research(input).await {
         Ok(output) => {
             // Send final status update
-            let _ = state.status_tx.send(StatusUpdate {
-                phase: "complete".to_string(),
-                message: output.running_summary.clone(),
-                elapsed_time: 0.0,
-                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                chain_of_thought: None,
-            });
+            let mut status = StatusUpdate::default();
+            status.phase = "complete".to_string();
+            status.message = output.running_summary.clone();
+            status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            let _ = state.status_tx.send(status);
             
             (
                 StatusCode::OK,
@@ -187,13 +185,13 @@ async fn handle_research(
         Err(e) => {
             eprintln!("Research error: {:?}", e);
             let error_message = e.to_string();
-            let _ = state.status_tx.send(StatusUpdate {
-                phase: "error".to_string(),
-                message: format!("Error: {}", error_message),
-                elapsed_time: 0.0,
-                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                chain_of_thought: None,
-            });
+
+            let mut status = StatusUpdate::default();
+            status.phase = "error".to_string();
+            status.message = format!("Error: {}", error_message);
+            status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            let _ = state.status_tx.send(status);
             
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -261,16 +259,12 @@ async fn update_config(
     let mut graph = state.graph.lock().await;
     
     // Send status updates
-    let _ = state.status_tx.send(StatusUpdate {
-        phase: "config".to_string(),
-        message: "Updating configuration...".to_string(),
-        elapsed_time: 0.0,
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        chain_of_thought: None,
-    });
+    let mut status = StatusUpdate::default();
+    status.phase = "config".to_string();
+    status.message = "Updating configuration...".to_string();
+    status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    let _ = state.status_tx.send(status);
 
     if let Some(llm) = update.local_llm {
         println!("Updating LLM to: {}", llm);

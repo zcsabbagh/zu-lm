@@ -20,6 +20,13 @@ impl ResearchTrack {
             web_research_results: Vec::new(),
         }
     }
+
+    pub fn should_continue_research(&self) -> bool {
+        // Continue if we have meaningful content and haven't reached diminishing returns
+        !self.running_summary.is_empty() && 
+        self.web_research_results.len() > 0 &&
+        self.research_loop_count < 3 // Hard limit to prevent infinite loops
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +51,14 @@ impl SummaryState {
 
     pub fn set_debate_perspectives(&mut self, perspectives: DebatePerspectives) {
         self.debate_perspectives = Some(perspectives);
+    }
+
+    pub fn get_track(&self, track: &str) -> &ResearchTrack {
+        match track {
+            "one" => &self.track_one,
+            "two" => &self.track_two,
+            _ => &self.track_one, // Default to track one
+        }
     }
 
     pub fn get_track_mut(&mut self, track: &str) -> &mut ResearchTrack {
@@ -99,4 +114,18 @@ pub struct StatusUpdate {
     pub chain_of_thought: Option<String>,
     pub track: Option<String>,
     pub perspectives: Option<DebatePerspectives>,
+}
+
+impl Default for StatusUpdate {
+    fn default() -> Self {
+        Self {
+            phase: String::new(),
+            message: String::new(),
+            elapsed_time: 0.0,
+            timestamp: 0,
+            chain_of_thought: None,
+            track: None,
+            perspectives: None,
+        }
+    }
 } 
