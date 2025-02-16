@@ -7,7 +7,16 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import "./App.css";
+import { ResearchFlow } from "@/components/ResearchFlow";
 
 interface DebatePerspectives {
   perspective_one: string;
@@ -43,7 +52,7 @@ interface ResearchConfig {
   groq_api_key?: string;
 }
 
-const formatMessage = (message: string, chain_of_thought?: string) => {
+const formatMessage = (message: string, chain_of_thought?: { content: string }) => {
   // Remove the phase prefix if it exists
   const cleanMessage = message.replace(/^\[[^\]]+\]\s*/, "");
 
@@ -54,7 +63,9 @@ const formatMessage = (message: string, chain_of_thought?: string) => {
         <div>{cleanMessage}</div>
         <div className="bg-yellow-50 p-3 rounded-md my-2">
           <div className="text-yellow-600 font-medium mb-1">Chain of Thought:</div>
-          <div className="whitespace-pre-wrap text-sm text-gray-700">{chain_of_thought}</div>
+          <div className="whitespace-pre-wrap text-sm text-gray-700">
+            {chain_of_thought.content}
+          </div>
         </div>
       </div>
     );
@@ -90,8 +101,7 @@ const formatMessage = (message: string, chain_of_thought?: string) => {
           {afterJson && <div>{afterJson}</div>}
         </div>
       );
-    } catch (e) {
-      // If JSON parsing fails, just return the original message
+    } catch (_e) {
       return cleanMessage;
     }
   }
@@ -104,7 +114,6 @@ export default function ResearchPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [status, setStatus] = useState("");
   const [summary, setSummary] = useState("");
-  const [phase, setPhase] = useState("");
   const [currentLoop, setCurrentLoop] = useState(0);
   const [totalLoops, setTotalLoops] = useState(0);
   const [statusHistory, setStatusHistory] = useState<StatusMessage[]>([]);
@@ -165,7 +174,8 @@ export default function ResearchPage() {
         console.log("Received status update:", data);
 
         setStatus(data.message);
-        setPhase(data.phase);
+        setCurrentLoop(0);
+        setTotalLoops(0);
         setRetryCount(0); // Reset retry count on successful message
 
         // Update loop progress
@@ -177,6 +187,16 @@ export default function ResearchPage() {
           }
         }
 
+        let chain_of_thought = null;
+        if (data.chain_of_thought) {
+          try {
+            chain_of_thought = JSON.parse(data.chain_of_thought);
+            console.log("chain_of_thought", chain_of_thought);
+          } catch (_error) {
+            chain_of_thought = { content: data.chain_of_thought };
+          }
+        }
+
         // Add to status history
         setStatusHistory((prev) => [
           ...prev,
@@ -184,7 +204,7 @@ export default function ResearchPage() {
             phase: data.phase,
             message: data.message,
             timestamp: data.timestamp,
-            chain_of_thought: data.chain_of_thought,
+            chain_of_thought: chain_of_thought,
             track: data.track,
             perspectives: data.perspectives,
           },
@@ -239,11 +259,10 @@ export default function ResearchPage() {
     setIsLoading(true);
     setSummary("");
     setStatus("Starting research...");
-    setPhase("");
-    setStatusHistory([]);
-    setRetryCount(0);
     setCurrentLoop(0);
     setTotalLoops(0);
+    setStatusHistory([]);
+    setRetryCount(0);
 
     try {
       // First establish SSE connection
@@ -329,11 +348,9 @@ export default function ResearchPage() {
         throw new Error("Failed to update configuration");
       }
 
-      const data = await response.json();
       setConfig((prev) => (prev ? { ...prev, research_mode: checked ? "remote" : "local" } : null));
     } catch (error) {
       console.error("Failed to update configuration:", error);
-      // Revert the toggle if update fails
       setIsRemoteMode(!checked);
     }
   };
@@ -363,14 +380,24 @@ export default function ResearchPage() {
     return [...groups, { ...status, loop }];
   }, [] as Array<StatusMessage & { loop: number }>);
 
+  const formatMessageWithType = (
+    message: string,
+    chain_of_thought?: string | { content: string }
+  ) => {
+    if (typeof chain_of_thought === "string") {
+      return formatMessage(message, { content: chain_of_thought });
+    }
+    return formatMessage(message, chain_of_thought);
+  };
+
   return (
     <div className="container mx-auto px-4 py-16">
       <div className="mb-6">
-        <h1>Research Assistant</h1>
-        <div className="mt-8 mb-4 p-4 bg-gray-50 rounded-lg">
+        <h1 className="text-5xl font-bold">Zue</h1>
+        <div className="mt-8 mb-4 p-4 bg-white rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="">Research Mode</h2>
+              <h3 className="">Research Mode</h3>
               <p className="text-sm text-gray-600">
                 {isRemoteMode ? "Using Groq API for research" : "Using local Ollama for research"}
               </p>
@@ -387,7 +414,7 @@ export default function ResearchPage() {
             </div>
           )}
         </div>
-        <form onSubmit={handleSubmit} className="space-y-4">
+        <form onSubmit={handleSubmit} className="space-y-4 flex flex-col justify-center">
           <div>
             <Label htmlFor="topic">Research Topic</Label>
             <Input
@@ -402,7 +429,7 @@ export default function ResearchPage() {
           <Button
             // type="submit"
             disabled={isLoading || !topic}
-            className="w-full"
+            size="lg"
             // className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
           >
             {isLoading ? "Researching..." : "Start Research"}
@@ -429,118 +456,72 @@ export default function ResearchPage() {
 
       {statusHistory.length > 0 && (
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold">Research Progress</h2>
-
           {/* Show debate perspectives if available */}
           {statusHistory.some((s) => s.perspectives) && (
-            <div className="mb-6 p-4 bg-blue-50 rounded-lg">
-              <h3 className="">Debate Perspectives</h3>
+            <div className="mb-6">
+              <h3 className="mb-4">Debate Perspectives</h3>
               {statusHistory.filter((s) => s.perspectives).slice(-1)[0].perspectives && (
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="p-3 bg-white rounded-lg">
-                    <h4 className="font-medium mb-1">Perspective One</h4>
-                    <p className="text-sm text-gray-600">
-                      {
-                        statusHistory.filter((s) => s.perspectives).slice(-1)[0].perspectives!
-                          .perspective_one
-                      }
-                    </p>
-                  </div>
-                  <div className="p-3 bg-white rounded-lg">
-                    <h4 className="font-medium mb-1">Perspective Two</h4>
-                    <p className="text-sm text-gray-600">
-                      {
-                        statusHistory.filter((s) => s.perspectives).slice(-1)[0].perspectives!
-                          .perspective_two
-                      }
-                    </p>
-                  </div>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Perspective One</CardTitle>
+                      {/* <CardDescription>Card Description</CardDescription> */}
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600">
+                        {
+                          statusHistory.filter((s) => s.perspectives).slice(-1)[0].perspectives!
+                            .perspective_one
+                        }
+                      </p>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle>Perspective Two</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <p className="text-sm text-gray-600">
+                        {
+                          statusHistory.filter((s) => s.perspectives).slice(-1)[0].perspectives!
+                            .perspective_two
+                        }
+                      </p>
+                    </CardContent>
+                  </Card>
                 </div>
               )}
             </div>
           )}
 
-          {/* Split view for parallel research tracks */}
-          <div className="grid grid-cols-2 gap-4">
-            {/* Track One */}
-            <div className="border rounded-lg divide-y">
-              <div className="p-3 bg-blue-50">
-                <h3 className="font-medium">Track One Progress</h3>
-              </div>
-              {statusHistory
-                .filter((status) => !status.track || status.track === "one")
-                .map((status, index) => (
-                  <div key={`track-one-${index}`} className="p-4">
-                    <div className="flex items-start">
-                      <div className="flex-shrink-0">
-                        <span
-                          className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
-                            status.phase === "error"
-                              ? "bg-red-100 text-red-800"
-                              : status.phase === "complete"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-blue-100 text-blue-800"
-                          }`}
-                        >
-                          {status.phase}
-                        </span>
-                      </div>
-                      <div className="ml-4 flex-grow">
-                        {formatMessage(status.message, status.chain_of_thought)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
-
-            {/* Track Two */}
-            <div className="border rounded-lg divide-y">
-              <div className="p-3 bg-blue-50">
-                <h3 className="font-medium">Track Two Progress</h3>
-              </div>
-              {statusHistory
-                .filter((status) => status.track === "two")
-                .map((status, index) => (
-                  <div key={`track-two-${index}`} className="p-4">
-                    <div className="flex items-start">
-                      <div className="flex-shrink-0">
-                        <span
-                          className={`inline-block px-2 py-1 text-xs font-semibold rounded-full ${
-                            status.phase === "error"
-                              ? "bg-red-100 text-red-800"
-                              : status.phase === "complete"
-                              ? "bg-green-100 text-green-800"
-                              : "bg-blue-100 text-blue-800"
-                          }`}
-                        >
-                          {status.phase}
-                        </span>
-                      </div>
-                      <div className="ml-4 flex-grow">
-                        {formatMessage(status.message, status.chain_of_thought)}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-            </div>
+          {/* Replace the grid view with ResearchFlow */}
+          <div className="border rounded-lg p-4">
+            <ResearchFlow statusHistory={statusHistory} />
           </div>
         </div>
       )}
 
       {summary && !isLoading && (
         <div className="mt-6 space-y-4">
-          <h2 className="text-lg font-semibold">Research Summary</h2>
-          <div className="bg-white p-6 rounded-lg border">
-            <div className="prose max-w-none">
-              <ReactMarkdown>{summary}</ReactMarkdown>
-            </div>
-          </div>
-          <button
+          <Card>
+            <CardHeader>
+              <CardTitle>
+                <h2>Research Summary</h2>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="prose max-w-none">
+                <ReactMarkdown>{summary}</ReactMarkdown>
+              </div>
+            </CardContent>
+          </Card>
+          <Button
             onClick={handleCreatePodcast}
-            className="w-full bg-green-500 text-white px-4 py-2 rounded-md hover:bg-green-600"
+            size="lg"
+            className="w-full bg-green-600 hover:bg-green-700"
           >
             Create Podcast from Summary
-          </button>
+          </Button>
         </div>
       )}
     </div>

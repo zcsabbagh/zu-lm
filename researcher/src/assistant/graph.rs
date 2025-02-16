@@ -116,11 +116,9 @@ impl Node for WebResearchNode {
         
         // Format results as JSON with structured content and sources
         let results_json = serde_json::json!({
-            "content": sources.iter()
-                .map(|source| format!("Source: {}\nURL: {}\nContent: {}\n", 
-                    source.title, source.url, source.content))
-                .collect::<Vec<String>>()
-                .join("\n---\n"),
+            "content": sources.first()
+                .map(|source| source.content.clone())
+                .unwrap_or_default(),
             "sources": sources,
         });
         
@@ -215,6 +213,7 @@ impl Node for SummarizerNode {
         let summary_json = serde_json::json!({
             "summary": summary.clone(),
             "sources": sources,
+
         });
         
         // Update the running summary in the state
@@ -287,7 +286,7 @@ impl Node for FinalizerNode {
         let track_two = state.get_track("two");
         
         let final_summary = format!(
-            "## Research Summary\n\n### Track One\n{}\n\n### Track One Sources:\n{}\n\n### Track Two\n{}\n\n### Track Two Sources:\n{}",
+            "### Track One\n{}\n\n### Track One Sources:\n{}\n\n### Track Two\n{}\n\n### Track Two Sources:\n{}",
             track_one.running_summary,
             track_one.sources.join("\n"),
             track_two.running_summary,
