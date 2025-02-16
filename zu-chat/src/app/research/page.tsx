@@ -499,7 +499,7 @@ export default function ResearchPage() {
   return (
     <div className="container mx-auto px-4 py-16">
       <div className="mb-6">
-        <h1 className="text-5xl font-bold">Zue</h1>
+        <h1 className="text-5xl font-bold font-mono">Zue Research</h1>
         <div className="mt-8 mb-4 p-4 bg-white rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.08)]">
           <div className="flex items-center justify-between">
             <div>
@@ -536,6 +536,7 @@ export default function ResearchPage() {
             // type="submit"
             disabled={isLoading || !topic}
             size="lg"
+            className="font-mono"
             // className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
           >
             {isLoading ? "Researching..." : "Start Research"}
