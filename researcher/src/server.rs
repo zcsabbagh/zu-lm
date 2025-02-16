@@ -18,6 +18,7 @@ use crate::assistant::{
     configuration::Configuration,
     state::{SummaryStateInput, StatusUpdate},
     graph::ResearchGraph,
+    configuration::ResearchMode,
 };
 use tower_http::cors::CorsLayer;
 use futures::stream::Stream;
@@ -50,6 +51,7 @@ pub struct AppState {
 struct ConfigUpdate {
     local_llm: Option<String>,
     max_web_research_loops: Option<i32>,
+    research_mode: Option<ResearchMode>,
 }
 
 #[derive(serde::Deserialize)]
@@ -90,6 +92,8 @@ impl From<anyhow::Error> for ApiError {
 struct ConfigResponse {
     local_llm: String,
     max_web_research_loops: i32,
+    research_mode: ResearchMode,
+    groq_model: String,
 }
 
 pub async fn run_server(config: Configuration) {
@@ -147,13 +151,12 @@ async fn handle_research(
     };
 
     // Send initial status update
-    if let Err(e) = state.status_tx.send(StatusUpdate {
-        phase: "init".to_string(),
-        message: format!("Starting research on topic: {}", input.research_topic),
-        elapsed_time: 0.0,
-        timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-        chain_of_thought: None,
-    }) {
+    let mut status = StatusUpdate::default();
+    status.phase = "init".to_string();
+    status.message = format!("Starting research on topic: {}", input.research_topic);
+    status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    if let Err(e) = state.status_tx.send(status) {
         eprintln!("Failed to send initial status update: {}", e);
     }
 
@@ -164,13 +167,12 @@ async fn handle_research(
     match graph.process_research(input).await {
         Ok(output) => {
             // Send final status update
-            let _ = state.status_tx.send(StatusUpdate {
-                phase: "complete".to_string(),
-                message: output.running_summary.clone(),
-                elapsed_time: 0.0,
-                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                chain_of_thought: None,
-            });
+            let mut status = StatusUpdate::default();
+            status.phase = "complete".to_string();
+            status.message = output.running_summary.clone();
+            status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            let _ = state.status_tx.send(status);
             
             (
                 StatusCode::OK,
@@ -182,18 +184,19 @@ async fn handle_research(
         },
         Err(e) => {
             eprintln!("Research error: {:?}", e);
-            let _ = state.status_tx.send(StatusUpdate {
-                phase: "error".to_string(),
-                message: format!("Error: {}", e),
-                elapsed_time: 0.0,
-                timestamp: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs(),
-                chain_of_thought: None,
-            });
+            let error_message = e.to_string();
+
+            let mut status = StatusUpdate::default();
+            status.phase = "error".to_string();
+            status.message = format!("Error: {}", error_message);
+            status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+            let _ = state.status_tx.send(status);
             
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ResearchResponse { 
-                    summary: format!("Error: {}", e),
+                    summary: format!("Error: {}", error_message),
                     status: "Error occurred".to_string(),
                 })
             ).into_response()
@@ -256,16 +259,12 @@ async fn update_config(
     let mut graph = state.graph.lock().await;
     
     // Send status updates
-    let _ = state.status_tx.send(StatusUpdate {
-        phase: "config".to_string(),
-        message: "Updating configuration...".to_string(),
-        elapsed_time: 0.0,
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs(),
-        chain_of_thought: None,
-    });
+    let mut status = StatusUpdate::default();
+    status.phase = "config".to_string();
+    status.message = "Updating configuration...".to_string();
+    status.timestamp = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs();
+
+    let _ = state.status_tx.send(status);
 
     if let Some(llm) = update.local_llm {
         println!("Updating LLM to: {}", llm);
@@ -275,6 +274,11 @@ async fn update_config(
     if let Some(loops) = update.max_web_research_loops {
         println!("Updating max loops to: {}", loops);
         graph.update_max_loops(loops);
+    }
+
+    if let Some(mode) = update.research_mode {
+        println!("Updating research mode to: {:?}", mode);
+        graph.update_research_mode(mode);
     }
     
     (
@@ -297,6 +301,8 @@ async fn get_config(
         Json(ConfigResponse {
             local_llm: graph.get_llm_model().to_string(),
             max_web_research_loops: graph.get_max_loops(),
+            research_mode: graph.get_research_mode(),
+            groq_model: graph.get_groq_model().to_string(),
         })
     )
 } 
