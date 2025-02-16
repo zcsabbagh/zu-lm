@@ -47,8 +47,8 @@ Some features can be configured through environment variables:
 - `MAX_WEB_RESEARCH_LOOPS` - Control research depth (default: 1)
 - `SEARCH_API` - Search provider to use (default: "perplexity")
 
-## Security Notice
 
+## Run the project
 
 To run the frontend server:
 
