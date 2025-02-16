@@ -9,6 +9,11 @@ interface PodcastSegment {
   text: string;
 }
 
+interface PodcastResponse {
+  title: string;
+  segments: PodcastSegment[];
+}
+
 const VOICE_IDS = {
   "Speaker 1": "JBFqnCBsd6RMkjVDRZzb",
   "Speaker 2": "ZF6FPAbjXT4488VcRRnw"
