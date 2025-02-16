@@ -3,11 +3,19 @@ import { NextResponse } from 'next/server';
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const MODEL = 'mixtral-8x7b-32768';
 
-const ENRICHMENT_PROMPT = `You are a knowledgeable assistant that provides additional context and information about topics. Given the following text, provide detailed, interesting, and relevant additional information that would help someone better understand the topic. Include historical context, related concepts, and interesting facts.
+const ENRICHMENT_PROMPT = `For the selected text below, provide 1-2 key facts that enhance understanding.
 
 Text to enrich: {text}
 
-Provide your response in a clear, well-structured format with markdown headings and bullet points where appropriate.`;
+Format your response exactly like this:
+* [First key fact in under 15 words]
+* [Optional second key fact in under 15 words]
+
+Requirements:
+- Provide 1-2 bullet points with asterisk (*)
+- Each bullet point must be under 15 words
+- Total response must be under 30 words
+- No additional formatting or explanations`;
 
 export async function POST(req: Request) {
   try {
@@ -38,15 +46,15 @@ export async function POST(req: Request) {
         messages: [
           {
             role: 'system',
-            content: 'You are a knowledgeable assistant that provides rich context and detailed information.'
+            content: 'You are a concise enrichment assistant. Provide essential facts in bullet points. Keep responses under 30 words total. Format exactly as specified.'
           },
           {
             role: 'user',
             content: ENRICHMENT_PROMPT.replace('{text}', text)
           }
         ],
-        temperature: 0.7,
-        max_tokens: 1000,
+        temperature: 0.2,
+        max_tokens: 150,
       }),
     });
 
