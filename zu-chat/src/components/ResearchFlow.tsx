@@ -279,7 +279,7 @@ export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProp
               <div className="font-semibold text-sm border-b border-gray-300 pb-2 font-mono">
                 {group[0].phase}
               </div>
-              <div className="text-xs whitespace-pre-wrap pt-2 px-4 pb-2 font-sans bg-white/40">
+              <div className="text-xs whitespace-pre-wrap pt-2 px-4 pb-2 font-sans bg-white/40 text-left">
                 {combinedMessage}
               </div>
               {combinedThoughts && (
@@ -395,7 +395,7 @@ export function ResearchFlow({ statusHistory, handleResearch }: ResearchFlowProp
   }, [statusHistory]);
 
   return (
-    <div style={{ height: "80vh", minHeight: "600px" }}>
+    <div style={{ height: "90vh", minHeight: "600px" }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

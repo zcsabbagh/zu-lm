@@ -1,4 +1,4 @@
-import { LANGUAGES, DURATIONS } from '@/lib/constants';
+import { LANGUAGES, DURATIONS } from "@/lib/constants";
 
 interface PodcastControlsProps {
   language: string;
@@ -35,7 +35,7 @@ export function PodcastControls({
             ))}
           </select>
         </div>
-        
+
         <div className="flex-1">
           <label className="block text-sm font-medium mb-2">Duration (minutes)</label>
           <select
@@ -56,10 +56,10 @@ export function PodcastControls({
       <button
         onClick={onGenerate}
         disabled={isGenerating}
-        className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
+        className="w-full bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md disabled:bg-gray-400 font-mono"
       >
-        {isGenerating ? 'Generating...' : 'Generate Podcast'}
+        {isGenerating ? "Generating..." : "Generate Podcast"}
       </button>
     </div>
   );
-} 
+}

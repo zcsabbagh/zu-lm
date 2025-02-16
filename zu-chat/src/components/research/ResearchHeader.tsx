@@ -1,4 +1,5 @@
-import Link from 'next/link';
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
 
 interface ResearchHeaderProps {
   title: string;
@@ -7,13 +8,10 @@ interface ResearchHeaderProps {
 export function ResearchHeader({ title }: ResearchHeaderProps) {
   return (
     <div className="flex justify-between items-center mb-6">
-      <h1 className="text-2xl font-bold">{title}</h1>
-      <Link
-        href="/research"
-        className="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600"
-      >
-        Research New Topic
-      </Link>
+      <h1 className="font-mono">{title}</h1>
+      <Button variant="secondary" asChild>
+        <Link href="/research">Research New Topic</Link>
+      </Button>
     </div>
   );
-} 
+}

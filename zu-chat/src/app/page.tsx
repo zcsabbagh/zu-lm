@@ -1,13 +1,16 @@
-'use client';
+"use client";
 
-import { useState, useEffect, useRef } from 'react';
-import { useChat } from 'ai/react';
-import Link from 'next/link';
-import { PodcastControls } from '@/components/podcast/PodcastControls';
-import { PodcastPlayer } from '@/components/podcast/PodcastPlayer';
-import { ResearchHeader } from '@/components/research/ResearchHeader';
-import { ResearchPerspectives } from '@/components/research/ResearchPerspectives';
-import { DEFAULT_RESEARCH_SUMMARY } from '@/lib/constants';
+import { useState, useEffect, useRef } from "react";
+import { useChat } from "ai/react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { PodcastControls } from "@/components/podcast/PodcastControls";
+import { PodcastPlayer } from "@/components/podcast/PodcastPlayer";
+import { ResearchHeader } from "@/components/research/ResearchHeader";
+import { ResearchPerspectives } from "@/components/research/ResearchPerspectives";
+import { DEFAULT_RESEARCH_SUMMARY } from "@/lib/constants";
+import { useConversation } from "@11labs/react";
 
 const LANGUAGES = [
   { value: "English", label: "English" },
@@ -49,15 +52,15 @@ export default function Home() {
   const [speakerImages, setSpeakerImages] = useState<SpeakerImage[]>([]);
   const [trackOne, setTrackOne] = useState<string | null>(null);
   const [trackTwo, setTrackTwo] = useState<string | null>(null);
-  const [selectedTrack, setSelectedTrack] = useState<'one' | 'two'>('one');
+  const [selectedTrack, setSelectedTrack] = useState<"one" | "two">("one");
   const audioRef = useRef<HTMLAudioElement>(null);
   const { messages, setMessages } = useChat();
   const [isTestMode, setIsTestMode] = useState(false);
 
   useEffect(() => {
     // Load research summaries from localStorage
-    const trackOne = localStorage.getItem('researchSummaryTrackOne');
-    const trackTwo = localStorage.getItem('researchSummaryTrackTwo');
+    const trackOne = localStorage.getItem("researchSummaryTrackOne");
+    const trackTwo = localStorage.getItem("researchSummaryTrackTwo");
     if (trackOne) setTrackOne(trackOne);
     if (trackTwo) setTrackTwo(trackTwo);
   }, []);
@@ -69,15 +72,15 @@ export default function Home() {
       if (audio) {
         // Stop any current playback
         audio.pause();
-        
+
         // Create and play the new segment
-        const blob = new Blob([audioSegments[currentSegment]], { type: 'audio/mpeg' });
+        const blob = new Blob([audioSegments[currentSegment]], { type: "audio/mpeg" });
         const url = URL.createObjectURL(blob);
         audio.src = url;
-        
+
         // Start playing automatically
-        audio.play().catch(error => {
-          console.error('Error playing audio:', error);
+        audio.play().catch((error) => {
+          console.error("Error playing audio:", error);
         });
 
         // Clean up previous URL if it exists
@@ -88,10 +91,10 @@ export default function Home() {
 
         // Update displayed message if not already shown
         if (!displayedMessages[currentSegment]) {
-          setDisplayedMessages(prev => {
+          setDisplayedMessages((prev) => {
             const newMessages = [...prev];
             newMessages[currentSegment] = {
-              role: 'assistant',
+              role: "assistant",
               content: `${transcript[currentSegment].speaker}: ${transcript[currentSegment].text}`,
             };
             return newMessages;
@@ -100,7 +103,7 @@ export default function Home() {
 
         audio.onended = () => {
           if (currentSegment < audioSegments.length - 1) {
-            setCurrentSegment(prev => prev + 1);
+            setCurrentSegment((prev) => prev + 1);
           }
         };
 
@@ -121,15 +124,15 @@ export default function Home() {
     setDisplayedMessages([]);
     setCurrentSegment(0);
     setSpeakerImages([]);
-    
+
     try {
-      const researchSummary = selectedTrack === 'one' ? trackOne : trackTwo;
+      const researchSummary = selectedTrack === "one" ? trackOne : trackTwo;
 
       // Generate podcast audio
-      const response = await fetch('/api/generate', {
-        method: 'POST',
+      const response = await fetch("/api/generate", {
+        method: "POST",
         headers: {
-          'Content-Type': 'application/json',
+          "Content-Type": "application/json",
         },
         body: JSON.stringify({
           language,
@@ -137,9 +140,9 @@ export default function Home() {
           researchSummary: researchSummary || DEFAULT_RESEARCH_SUMMARY,
         }),
       });
-      
+
       if (!response.ok) {
-        throw new Error('Failed to generate podcast');
+        throw new Error("Failed to generate podcast");
       }
 
       const data = await response.json();
@@ -157,8 +160,8 @@ export default function Home() {
           }
           return bytes.buffer;
         } catch (error) {
-          console.error('Error decoding audio segment:', error);
-          throw new Error('Failed to decode audio data');
+          console.error("Error decoding audio segment:", error);
+          throw new Error("Failed to decode audio data");
         }
       });
 
@@ -168,10 +171,10 @@ export default function Home() {
       // Generate images for all segments
       setIsGeneratingImages(true);
       try {
-        const imageResponse = await fetch('/api/generate/images', {
-          method: 'POST',
+        const imageResponse = await fetch("/api/generate/images", {
+          method: "POST",
           headers: {
-            'Content-Type': 'application/json',
+            "Content-Type": "application/json",
           },
           body: JSON.stringify({
             transcript: data.transcript,
@@ -179,7 +182,7 @@ export default function Home() {
         });
 
         if (!imageResponse.ok) {
-          throw new Error('Failed to generate images');
+          throw new Error("Failed to generate images");
         }
 
         const imageData = await imageResponse.json();
@@ -190,27 +193,81 @@ export default function Home() {
         setSpeakerImages(imageData.images);
         setIsReady(true);
       } catch (error) {
-        console.error('Error generating images:', error);
+        console.error("Error generating images:", error);
         setIsReady(true);
       } finally {
         setIsGeneratingImages(false);
       }
 
       // Clear the research summaries after successful generation
-      localStorage.removeItem('researchSummaryTrackOne');
-      localStorage.removeItem('researchSummaryTrackTwo');
+      localStorage.removeItem("researchSummaryTrackOne");
+      localStorage.removeItem("researchSummaryTrackTwo");
       setTrackOne(null);
       setTrackTwo(null);
     } catch (error) {
-      console.error('Generation error:', error);
-      alert(error instanceof Error ? error.message : 'Failed to generate podcast');
+      console.error("Generation error:", error);
+      alert(error instanceof Error ? error.message : "Failed to generate podcast");
     } finally {
       setIsGenerating(false);
     }
   };
 
+  const [isListening, setIsListening] = useState(false);
+  const conversation = useConversation({
+    onConnect: () => {
+      console.log("Connected to conversation");
+    },
+    onDisconnect: () => {
+      console.log("Disconnected from conversation");
+      setIsListening(false);
+    },
+    onMessage: (message) => {
+      console.log("Received message:", message);
+    },
+    onError: (error) => {
+      console.error("Conversation error:", error);
+      setIsListening(false);
+    },
+  });
+
+  const { status, isSpeaking } = conversation;
+
+  const startConversation = async () => {
+    try {
+      // Request microphone access
+      await navigator.mediaDevices.getUserMedia({ audio: true });
+
+      // Start the conversation with your agent ID
+      const conversationId = await conversation.startSession({
+        agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID,
+      });
+
+      console.log("Started conversation:", conversationId);
+      setIsListening(true);
+    } catch (error) {
+      console.error("Failed to start conversation:", error);
+    }
+  };
+
+  const stopConversation = async () => {
+    try {
+      await conversation.endSession();
+      setIsListening(false);
+    } catch (error) {
+      console.error("Failed to stop conversation:", error);
+    }
+  };
+
+  const adjustVolume = async (volume: number) => {
+    try {
+      await conversation.setVolume({ volume });
+    } catch (error) {
+      console.error("Failed to adjust volume:", error);
+    }
+  };
+
   return (
-    <div className="container mx-auto px-4 py-8">
+    <div className="container mx-auto px-4 py-16">
       <ResearchHeader title="Podcast Generator" />
 
       {(trackOne || trackTwo) && (
@@ -243,17 +300,51 @@ export default function Home() {
             totalSegments={displayedMessages.length}
             onNext={() => {
               if (currentSegment < displayedMessages.length - 1) {
-                setCurrentSegment(prev => prev + 1);
+                setCurrentSegment((prev) => prev + 1);
               }
             }}
             onPrevious={() => {
               if (currentSegment > 0) {
-                setCurrentSegment(prev => prev - 1);
+                setCurrentSegment((prev) => prev - 1);
               }
             }}
           />
+        </div>
+      )}
 
-            
+      {displayedMessages.length > 0 && (
+        <div className="container mx-auto px-4 py-16">
+          <Card className="p-6  mx-auto">
+            <h1 className="text-2xl font-bold mb-6">ElevenLabs Conversation Test</h1>
+
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium">Status: {status}</p>
+                  {isSpeaking && <p className="text-sm text-blue-600">Agent is speaking...</p>}
+                </div>
+                <Button
+                  onClick={isListening ? stopConversation : startConversation}
+                  variant={isListening ? "destructive" : "default"}
+                >
+                  {isListening ? "Stop Conversation" : "Start Conversation"}
+                </Button>
+              </div>
+
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Volume</p>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.1"
+                  defaultValue="0.5"
+                  onChange={(e) => adjustVolume(parseFloat(e.target.value))}
+                  className="w-full"
+                />
+              </div>
+            </div>
+          </Card>
         </div>
       )}
     </div>

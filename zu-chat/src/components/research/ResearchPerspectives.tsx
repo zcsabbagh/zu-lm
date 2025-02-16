@@ -1,5 +1,5 @@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 interface ResearchPerspectivesProps {
   trackOne: string | null;
   trackTwo: string | null;
@@ -28,11 +28,25 @@ export function ResearchPerspectives({
         </TabsList>
 
         <TabsContent value="one">
-          <div className="prose max-w-none">{trackOne}</div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Perspective One</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="prose">{trackOne}</div>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         <TabsContent value="two">
-          <div className="prose max-w-none">{trackTwo}</div>
+          <Card>
+            <CardHeader>
+              <CardTitle>Perspective Two</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="prose">{trackTwo}</div>
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
     </div>

@@ -552,11 +552,11 @@ export default function ResearchPage() {
               disabled={isLoading}
             />
           </div>
-          {isRemoteMode && !config?.groq_api_key && (
+          {/* {isRemoteMode && !config?.groq_api_key && (
             <div className="mt-2 text-sm text-yellow-600">
               Warning: Groq API key not configured. Please add it to your .env file.
             </div>
-          )}
+          )} */}
         </div>
         <form onSubmit={handleSubmit} className="space-y-4 flex flex-col justify-center">
           <div>
@@ -587,7 +587,7 @@ export default function ResearchPage() {
           <div className="flex items-center mb-2">
             <div className="w-full bg-gray-200 rounded-full h-2.5">
               <div
-                className="bg-blue-600 h-2.5 rounded-full"
+                className="bg-black h-2.5 rounded-full"
                 style={{ width: `${(currentLoop / totalLoops) * 100}%` }}
               ></div>
             </div>
