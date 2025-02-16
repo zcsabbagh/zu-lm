@@ -9,6 +9,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import Image from "next/image";
 import {
+  HoverCard,
+  HoverCardContent,
+  HoverCardTrigger,
+} from "@/components/ui/hover-card";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -70,44 +75,77 @@ const SourceList = ({ sources, title }: SourceListProps) => {
   return (
     <div className="space-y-4">
       <h3 className="font-semibold text-lg">{title}</h3>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="flex flex-wrap gap-3">
         {sources.map((source, index) => {
           const faviconUrl = source.url !== '#' 
             ? `https://www.google.com/s2/favicons?domain=${source.domain}&sz=32`
             : '/default-favicon.png';
           
           return (
-            <a 
-              key={index}
-              href={source.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`block ${source.url === '#' ? 'cursor-not-allowed' : ''}`}
-              onClick={source.url === '#' ? (e) => e.preventDefault() : undefined}
-            >
-              <div className="flex items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-200">
-                <div className="flex items-center space-x-3 flex-1">
-                  <span className="text-gray-500 text-sm min-w-[24px] font-medium">{source.sourceNumber}</span>
-                  <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded-lg overflow-hidden">
+            <HoverCard key={index}>
+              <HoverCardTrigger asChild>
+                <a 
+                  href={source.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className={`flex-shrink-0 w-[300px] ${source.url === '#' ? 'cursor-not-allowed' : ''}`}
+                  onClick={source.url === '#' ? (e) => e.preventDefault() : undefined}
+                >
+                  <div className="flex items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-200 h-full">
+                    <div className="flex items-center space-x-3 flex-1">
+                      <span className="text-gray-500 text-sm min-w-[24px] font-medium">{source.sourceNumber}</span>
+                      <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded-lg overflow-hidden">
+                        <Image
+                          src={faviconUrl}
+                          alt={source.domain || 'favicon'}
+                          width={32}
+                          height={32}
+                          className="rounded-lg"
+                          onError={(e) => {
+                            const imgElement = e.target as HTMLImageElement;
+                            imgElement.src = '/default-favicon.png';
+                          }}
+                        />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 truncate">{source.title}</p>
+                        <p className="text-sm text-gray-500 truncate">{source.domain || 'Unknown source'}</p>
+                      </div>
+                    </div>
+                  </div>
+                </a>
+              </HoverCardTrigger>
+              <HoverCardContent 
+                className="w-80" 
+                side="top" 
+                align="center"
+                sideOffset={8}
+              >
+                <div className="flex justify-between space-x-4">
+                  <div className="space-y-1">
+                    <h4 className="text-sm font-semibold">{source.title}</h4>
+                    <p className="text-sm text-gray-600">{source.domain}</p>
+                    <div className="flex items-center pt-2">
+                      <span className="text-xs text-gray-500">
+                        Click to visit source
+                      </span>
+                    </div>
+                  </div>
+                  <div className="w-12 h-12 relative bg-gray-200 rounded-lg overflow-hidden">
                     <Image
                       src={faviconUrl}
                       alt={source.domain || 'favicon'}
-                      width={32}
-                      height={32}
-                      className="rounded-lg"
+                      fill
+                      className="object-cover"
                       onError={(e) => {
                         const imgElement = e.target as HTMLImageElement;
                         imgElement.src = '/default-favicon.png';
                       }}
                     />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate">{source.title}</p>
-                    <p className="text-sm text-gray-500 truncate">{source.domain || 'Unknown source'}</p>
-                  </div>
                 </div>
-              </div>
-            </a>
+              </HoverCardContent>
+            </HoverCard>
           );
         })}
       </div>
