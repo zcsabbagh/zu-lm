@@ -101,16 +101,19 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
         data: {
           label: (
             <div style={{ maxWidth: `${width}px` }}>
-              <div className="font-semibold text-sm border-b border-gray-300 pb-2 font-mono backdrop-blur-sm bg-white/30">
+              <div className="font-semibold text-sm border-b rounded-t-lg border-gray-300 pt-2 pb-2 font-mono">
                 Research Perspectives
               </div>
-              <div className="text-xs mt-2 bg-white">{firstStatus.perspectives.topic}</div>
+              <div className="text-xs py-2 bg-white rounded-b-lg font-sans">
+                {firstStatus.perspectives.topic}
+              </div>
             </div>
           ),
         },
         style: {
           //   background: "#EFF6FF",
-          padding: "10px 0",
+          //   padding: "10px 0",
+          padding: 0,
           borderRadius: "10px",
           background: "transparent",
           border: "1px solid #e0e0e0",
@@ -164,12 +167,14 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
           data: {
             label: (
               <div style={{ maxWidth: `${width}px` }}>
-                <div className="font-semibold text-sm border-b border-gray-300 pb-2 font-mono">
+                <div className="font-semibold text-sm border-b border-gray-300 pb-2 font-mono pt-2">
                   {status.phase}
                 </div>
-                <div className="text-xs whitespace-pre-wrap mt-2">{combinedMessage}</div>
+                <div className="text-xs whitespace-pre-wrap pt-2 px-4 pb-2 font-sans bg-white/40">
+                  {combinedMessage}
+                </div>
                 {combinedThoughts && (
-                  <div className="text-xs mt-2 px-4 whitespace-pre-wrap text-left">
+                  <div className="text-xs px-4 whitespace-pre-wrap text-left font-sans bg-white/40 py-4">
                     {combinedThoughts}
                   </div>
                 )}
@@ -177,15 +182,19 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
             ),
           },
           style: {
-            padding: "10px 0",
+            padding: "0",
             borderRadius: "10px",
             border: "1px solid #e0e0e0",
             background:
               status.phase === "error"
-                ? "#FEE2E2"
+                ? "#FEE2E280"
                 : status.phase === "complete"
-                ? "#D1FAE5"
-                : "#EFF6FF",
+                ? "#D1FAE580"
+                : status.phase === "summary"
+                ? "#FED7AA80"
+                : status.phase === "query"
+                ? "#DDD6FE80"
+                : "#EFF6FF80",
             width: `${width}px`,
           },
         };
@@ -218,7 +227,7 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
         }
 
         // Update Y position for next node
-        currentY += contentHeight + 20; // 40px spacing between nodes
+        currentY += contentHeight + 30; // 40px spacing between nodes
       });
 
       return currentY;
@@ -234,7 +243,16 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
 
       const width = group[0].phase === "complete" ? 1000 : 300;
 
-      const combinedMessage = group.map((s) => s.message).join("\n\n");
+      const combinedMessage = group
+        .map((s) => s.message)
+        .join("\n\n")
+        .split("\n")
+        .filter(
+          (line) =>
+            !line.trim().toLowerCase().startsWith("###") &&
+            !line.trim().toLowerCase().startsWith("- perplexity search")
+        )
+        .join("\n");
       const combinedThoughts = group
         .filter((s) => s.chain_of_thought?.content)
         .map((s) => s.chain_of_thought!.content)
@@ -247,21 +265,40 @@ export function ResearchFlow({ statusHistory }: ResearchFlowProps) {
         data: {
           label: (
             <div style={{ maxWidth: `${width}px` }}>
-              <div className="font-semibold text-sm">{group[0].phase}</div>
-              <div className="text-xs whitespace-pre-wrap text-left">{combinedMessage}</div>
+              <div className="font-semibold text-sm border-b border-gray-300 pb-2 font-mono">
+                {group[0].phase}
+              </div>
+              <div className="text-xs whitespace-pre-wrap pt-2 px-4 pb-2 font-sans bg-white/40">
+                {combinedMessage}
+              </div>
               {combinedThoughts && (
-                <div className="text-xs mt-2 whitespace-pre-wrap text-left">{combinedThoughts}</div>
+                <div className="text-xs mt-2 px-4 whitespace-pre-wrap text-left font-sans">
+                  {combinedThoughts}
+                </div>
               )}
             </div>
           ),
         },
         style: {
+          padding: "10px 0",
+          borderRadius: "10px",
+          border: "1px solid #e0e0e0",
           background:
             group[0].phase === "error"
-              ? "#FEE2E2"
+              ? "#FEE2E280"
               : group[0].phase === "complete"
-              ? "#D1FAE5"
-              : "#EFF6FF",
+              ? "#D1FAE580"
+              : group[0].phase === "summary"
+              ? "#FDE68A80"
+              : group[0].phase === "research"
+              ? "#BFDBFE80"
+              : group[0].phase === "loop"
+              ? "#DDD6FE80"
+              : group[0].phase === "query"
+              ? "#A7F3D080"
+              : group[0].phase === "reflection"
+              ? "#FED7AA80"
+              : "#EFF6FF80",
           width: `${width}px`,
         },
       };
