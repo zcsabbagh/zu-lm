@@ -1,11 +1,12 @@
 @import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 body {
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Open Sans", sans-serif;
 }
 
 @layer base {
@@ -75,4 +76,8 @@ body {
 
 .font-mono {
   font-family: "JetBrains Mono", monospace;
+}
+
+.font-sans {
+  font-family: "Open Sans", sans-serif;
 }
