@@ -46,8 +46,13 @@ pub async fn generate_debate_perspectives(topic: &str, config: &Configuration) -
         }
     };
 
+    // Extract JSON from response by finding the first '{' and last '}'
+    let json_start = response.find('{').unwrap_or(0);
+    let json_end = response.rfind('}').map(|i| i + 1).unwrap_or(response.len());
+    let json_str = &response[json_start..json_end];
+
     // Parse the response, ensuring proper JSON escaping
-    match serde_json::from_str::<DebatePerspectives>(&response) {
+    match serde_json::from_str::<DebatePerspectives>(json_str) {
         Ok(perspectives) => Ok(perspectives),
         Err(e) => {
             eprintln!("Failed to parse debate perspectives: {}", e);
