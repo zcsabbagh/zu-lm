@@ -313,26 +313,42 @@ export default function Home() {
       )}
 
       {displayedMessages.length > 0 && (
-        <div className="container mx-auto px-4 py-16">
-          <Card className="p-6  mx-auto">
-            <h1 className="text-2xl font-bold mb-6">ElevenLabs Conversation Test</h1>
+        <div className="container mx-auto py-16">
+          <Card className="p-8 mx-auto bg-gradient-to-b from-white to-gray-50 dark:from-gray-900 dark:to-gray-950 shadow-lg">
+            <h2 className="font-mono mb-8 pb-4 border-b dark:border-gray-800">Feynman Review</h2>
 
-            <div className="space-y-4">
+            <div className="space-y-6">
               <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">Status: {status}</p>
-                  {isSpeaking && <p className="text-sm text-blue-600">Agent is speaking...</p>}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`w-2 h-2 rounded-full ${
+                        status === "connected" ? "bg-green-500" : "bg-gray-400"
+                      }`}
+                    />
+                    <p className="text-sm font-medium">Status: {status}</p>
+                  </div>
+                  {isSpeaking && (
+                    <p className="text-sm flex items-center gap-2">
+                      <span className="inline-block w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+                      Agent is speaking...
+                    </p>
+                  )}
                 </div>
                 <Button
                   onClick={isListening ? stopConversation : startConversation}
                   variant={isListening ? "destructive" : "default"}
+                  className="min-w-[160px]"
                 >
                   {isListening ? "Stop Conversation" : "Start Conversation"}
                 </Button>
               </div>
 
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Volume</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">Volume Control</p>
+                  <p className="text-xs text-gray-500">Adjust speaker volume</p>
+                </div>
                 <input
                   type="range"
                   min="0"
@@ -340,7 +356,7 @@ export default function Home() {
                   step="0.1"
                   defaultValue="0.5"
                   onChange={(e) => adjustVolume(parseFloat(e.target.value))}
-                  className="w-full"
+                  className="w-full accent-gray-500 dark:accent-gray-400"
                 />
               </div>
             </div>

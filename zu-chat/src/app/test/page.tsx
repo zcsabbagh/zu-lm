@@ -30,12 +30,12 @@ export default function TestPage() {
     try {
       // Request microphone access
       await navigator.mediaDevices.getUserMedia({ audio: true });
-      
+
       // Start the conversation with your agent ID
       const conversationId = await conversation.startSession({
         agentId: process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID,
       });
-      
+
       console.log("Started conversation:", conversationId);
       setIsListening(true);
     } catch (error) {
@@ -63,8 +63,8 @@ export default function TestPage() {
   return (
     <div className="container mx-auto px-4 py-16">
       <Card className="p-6 max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6">ElevenLabs Conversation Test</h1>
-        
+        <h1 className="mb-6 font-mono">Feynman Review</h1>
+
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -95,4 +95,4 @@ export default function TestPage() {
       </Card>
     </div>
   );
-} 
+}
