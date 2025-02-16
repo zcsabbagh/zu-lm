@@ -25,7 +25,7 @@ use super::debate::{generate_debate_perspectives, DebatePerspectives};
 
 #[async_trait]
 pub trait Node: Send + Sync {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String>;
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration, track: &str) -> Result<String>;
 }
 
 pub struct QueryGeneratorNode;
@@ -36,7 +36,7 @@ pub struct FinalizerNode;
 
 #[async_trait]
 impl Node for QueryGeneratorNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration, track: &str) -> Result<String> {
         let research_topic = {
             let state = state.lock().await;
             state.research_topic.clone()
@@ -75,63 +75,71 @@ impl Node for QueryGeneratorNode {
             Err(_) => research_topic.clone(), // Fallback to original topic if parsing fails
         };
         
-        let mut state = state.lock().await;
-        state.set_search_query(search_query.clone());
-        
-        Ok(format!("Using search query: {} (based on original topic: {})", search_query, research_topic))
+        Ok(search_query)
     }
 }
 
 #[async_trait]
 impl Node for WebResearchNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<String> {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration, track: &str) -> Result<String> {
         let (query, loop_count) = {
             let state = state.lock().await;
-            (
-                state.search_query.clone().unwrap_or_default(),
-                state.research_loop_count,
-            )
+            let track_state = state.get_track(track);
+            (track_state.search_query.clone(), track_state.research_loop_count as i32)
         };
         
         let search_results = perplexity_search(&query, loop_count).await?;
         
-        let search_str = format_sources(&search_results);
-        let mut state = state.lock().await;
-        state.add_source(search_str.clone());
-        state.increment_loop_count();
-        state.add_web_research_result(serde_json::to_string(&search_results)?);
+        // Extract and store sources
+        {
+            let mut state_lock = state.lock().await;
+            for result in &search_results.results {
+                state_lock.add_source(track, format!("- {} ({})", result.title, result.url));
+            }
+        }
         
-        Ok(format!("Web research results:\n{}", search_str))
+        // Format and store the search results with content
+        let formatted_results = search_results.results.iter()
+            .map(|result| format!("Source: {}\nURL: {}\nContent: {}\n", 
+                result.title, result.url, result.content))
+            .collect::<Vec<String>>()
+            .join("\n---\n");
+        
+        {
+            let mut state_lock = state.lock().await;
+            state_lock.add_web_research_result(track, formatted_results.clone());
+        }
+        
+        Ok(formatted_results)
     }
 }
 
 #[async_trait]
 impl Node for SummarizerNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
-        let (research_topic, existing_summary, latest_research) = {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration, track: &str) -> Result<String> {
+        let (research_topic, track_state) = {
             let state = state.lock().await;
             (
                 state.research_topic.clone(),
-                state.running_summary.clone(),
-                state.web_research_results.last().cloned(),
+                state.get_track(track).clone(),
             )
         };
         
-        let human_message = if let Some(summary) = existing_summary {
+        let human_message = if !track_state.running_summary.is_empty() {
             format!(
                 "<User Input> \n {} \n </User Input>\n\n\
                 <Existing Summary> \n {} \n </Existing Summary>\n\n\
                 <New Search Results> \n {} \n </New Search Results>",
                 research_topic,
-                summary,
-                latest_research.unwrap_or_default()
+                track_state.running_summary,
+                track_state.web_research_results.last().cloned().unwrap_or_default()
             )
         } else {
             format!(
                 "<User Input> \n {} \n </User Input>\n\n\
                 <Search Results> \n {} \n </Search Results>",
                 research_topic,
-                latest_research.unwrap_or_default()
+                track_state.web_research_results.last().cloned().unwrap_or_default()
             )
         };
 
@@ -164,28 +172,25 @@ impl Node for SummarizerNode {
             summary = format!("{}{}", &summary[..start], &summary[end + 8..]);
         }
         
-        let mut state = state.lock().await;
-        state.set_running_summary(summary);
-        
-        Ok(response)
+        Ok(summary)
     }
 }
 
 #[async_trait]
 impl Node for ReflectionNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration) -> Result<String> {
-        let (research_topic, running_summary) = {
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, config: &Configuration, track: &str) -> Result<String> {
+        let (research_topic, track_state) = {
             let state = state.lock().await;
             (
                 state.research_topic.clone(),
-                state.running_summary.clone().unwrap_or_default(),
+                state.get_track(track).clone(),
             )
         };
         
         let instructions = format_reflection_instructions(&research_topic);
         let human_message = format!(
             "Identify a knowledge gap and generate a follow-up web search query based on our existing knowledge: {}",
-            running_summary
+            track_state.running_summary
         );
 
         let response = match config.research_mode {
@@ -210,8 +215,6 @@ impl Node for ReflectionNode {
             }
         };
         
-        let response_text = response.clone();
-        
         // Try to parse as JSON, if fails, use a fallback query
         let query = match serde_json::from_str::<Value>(&response) {
             Ok(json) => json["follow_up_query"]
@@ -221,27 +224,24 @@ impl Node for ReflectionNode {
             Err(_) => format!("Tell me more about {}", research_topic),
         };
         
-        let mut state = state.lock().await;
-        state.set_search_query(query);
-        
-        Ok(response_text)
+        Ok(query)
     }
 }
 
 #[async_trait]
 impl Node for FinalizerNode {
-    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration) -> Result<String> {
-        let mut state = state.lock().await;
-        let sources = state.sources_gathered.join("\n");
-        let summary = state.running_summary.clone().unwrap_or_default();
+    async fn process(&self, state: Arc<Mutex<SummaryState>>, _config: &Configuration, _track: &str) -> Result<String> {
+        let state = state.lock().await;
+        let track_one = state.get_track("one");
+        let track_two = state.get_track("two");
         
         let final_summary = format!(
-            "## Summary\n\n{}\n\n### Sources:\n{}",
-            summary,
-            sources
+            "## Research Summary\n\n### Track One\n{}\n\n### Track One Sources:\n{}\n\n### Track Two\n{}\n\n### Track Two Sources:\n{}",
+            track_one.running_summary,
+            track_one.sources.join("\n"),
+            track_two.running_summary,
+            track_two.sources.join("\n")
         );
-        
-        state.set_running_summary(final_summary.clone());
         
         Ok(final_summary)
     }
@@ -294,26 +294,26 @@ impl ResearchGraph {
         self.status_tx = Some(tx);
     }
 
-    fn send_status(&self, phase: &str, message: &str, chain_of_thought: Option<String>) {
+    fn send_status(&self, phase: &str, message: &str, perspectives: Option<DebatePerspectives>) {
         if let Some(tx) = &self.status_tx {
             let now = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_secs();
 
-            let status = StatusUpdate {
-                phase: phase.to_string(),
-                message: message.to_string(),
-                elapsed_time: 0.0,
-                timestamp: now,
-                chain_of_thought,
-            };
+            let mut status = StatusUpdate::default();
+            status.phase = phase.to_string();
+            status.message = message.to_string();
+            status.elapsed_time = 0.0;
+            status.timestamp = now;
+            status.chain_of_thought = None;
+            status.track = None;
+            status.perspectives = perspectives;
 
             match tx.send(status) {
                 Ok(_) => println!("Sent status update: phase={}, message={}", phase, message),
                 Err(e) => {
                     eprintln!("Failed to send status update: {} (phase={}, message={})", e, phase, message);
-                    // Don't fail the research process if status updates fail
                 }
             }
         } else {
@@ -338,36 +338,22 @@ impl ResearchGraph {
                 state_lock.set_debate_perspectives(perspectives.clone());
                 drop(state_lock);
 
-                let status = StatusUpdate {
-                    phase: "init".to_string(),
-                    message: "Generated debate perspectives".to_string(),
-                    elapsed_time: 0.0,
-                    timestamp: SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs(),
-                    chain_of_thought: None,
-                    track: None,
-                    perspectives: Some(perspectives.clone()),
-                };
+                self.send_status_with_perspectives("init", "Generated debate perspectives", Some(perspectives.clone()));
 
-                if let Some(tx) = &self.status_tx {
-                    tx.send(status).map_err(|e| anyhow::anyhow!("Failed to send status: {}", e))?;
-                }
+                // Process both tracks in parallel using tokio::join!
+                let track_one_future = self.process_track(state.clone(), "one");
+                let track_two_future = self.process_track(state.clone(), "two");
 
-                // Process both tracks in parallel
-                let (track_one, track_two) = tokio::join!(
-                    self.process_track(state.clone(), "one"),
-                    self.process_track(state.clone(), "two")
-                );
+                let (track_one_result, track_two_result) = tokio::join!(track_one_future, track_two_future);
 
-                track_one?;
-                track_two?;
+                // Check results from both tracks
+                track_one_result?;
+                track_two_result?;
 
                 // Generate final summary combining both perspectives
                 let finalizer_node = &self.nodes[4];
                 self.send_status_with_track("final", "Starting final summary compilation...", None, None);
-                let response = finalizer_node.process(state.clone(), &self.config).await?;
+                let response = finalizer_node.process(state.clone(), &self.config, "one").await?;
                 self.send_status_with_track("final", "Completed final summary compilation", Some(response.clone()), None);
 
                 let mut final_state = state.lock().await;
@@ -415,63 +401,77 @@ impl ResearchGraph {
     }
 
     async fn process_track(&self, state: Arc<Mutex<SummaryState>>, track: &str) -> Result<()> {
-        // Initial query generation
-        let query_node = &self.nodes[0];
-        self.send_status_with_track("query", &format!("Starting initial query generation for track {}...", track), None, Some(track));
-        let response = query_node.process(state.clone(), &self.config).await?;
-        
+        let mut loop_count = 0;
+        let max_loops = self.config.max_web_research_loops;
+
+        // Initialize track with debate perspective if available
         {
-            let mut state_lock = state.lock().await;
-            state_lock.set_search_query(track, response.clone());
+            let state_lock = state.lock().await;
+            if let Some(perspectives) = &state_lock.debate_perspectives {
+                let initial_query = if track == "one" {
+                    perspectives.perspective_one.clone()
+                } else {
+                    perspectives.perspective_two.clone()
+                };
+                drop(state_lock);
+                
+                let mut state_lock = state.lock().await;
+                state_lock.set_search_query(track, initial_query);
+                drop(state_lock);
+            }
         }
-        
-        self.send_status_with_track("query", &format!("Completed initial query generation for track {}", track), Some(response), Some(track));
 
-        // Main research loop
-        for loop_count in 0..self.config.max_web_research_loops {
-            self.send_status_with_track("loop", &format!("Starting research loop {} of {} for track {}", loop_count + 1, self.config.max_web_research_loops, track), None, Some(track));
+        while loop_count < max_loops {
+            loop_count += 1;
+            self.send_status_with_track(
+                "loop",
+                &format!("Starting research loop {} of {} for track {}", loop_count, max_loops, track),
+                None,
+                Some(track),
+            );
 
-            // Web research
-            let research_node = &self.nodes[1];
-            self.send_status_with_track("research", &format!("Starting web research for loop {} on track {}...", loop_count + 1, track), None, Some(track));
-            let response = research_node.process(state.clone(), &self.config).await?;
-            
-            {
-                let mut state_lock = state.lock().await;
-                state_lock.add_web_research_result(track, response.clone());
+            // Web Research Phase
+            let web_research_node = &self.nodes[0];
+            self.send_status_with_track("research", "Starting web research...", None, Some(track));
+            let response = web_research_node.process(state.clone(), &self.config, track).await?;
+            self.send_status_with_track("research", "Completed web research", Some(response), Some(track));
+
+            // Summarization Phase
+            let summarizer_node = &self.nodes[1];
+            self.send_status_with_track("summary", "Starting summarization...", None, Some(track));
+            let response = summarizer_node.process(state.clone(), &self.config, track).await?;
+            self.send_status_with_track("summary", "Completed summarization", Some(response), Some(track));
+
+            // Reflection Phase
+            let reflection_node = &self.nodes[2];
+            self.send_status_with_track("reflection", "Starting reflection...", None, Some(track));
+            let response = reflection_node.process(state.clone(), &self.config, track).await?;
+            self.send_status_with_track("reflection", "Completed reflection", Some(response), Some(track));
+
+            // Query Generation Phase
+            let query_node = &self.nodes[3];
+            self.send_status_with_track("query", "Starting query generation...", None, Some(track));
+            let response = query_node.process(state.clone(), &self.config, track).await?;
+            self.send_status_with_track("query", "Generated next query", Some(response), Some(track));
+
+            // Check if we should continue
+            let state_lock = state.lock().await;
+            let should_continue = if track == "one" {
+                state_lock.track_one.should_continue_research()
+            } else {
+                state_lock.track_two.should_continue_research()
+            };
+            drop(state_lock);
+
+            if !should_continue {
+                self.send_status_with_track(
+                    "complete",
+                    &format!("Research track {} completed after {} loops", track, loop_count),
+                    None,
+                    Some(track),
+                );
+                break;
             }
-            
-            self.send_status_with_track("research", &format!("Completed web research for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
-
-            // Summarization
-            let summary_node = &self.nodes[2];
-            self.send_status_with_track("summary", &format!("Starting summary for loop {} on track {}...", loop_count + 1, track), None, Some(track));
-            let response = summary_node.process(state.clone(), &self.config).await?;
-            
-            {
-                let mut state_lock = state.lock().await;
-                state_lock.set_running_summary(track, response.clone());
-            }
-            
-            self.send_status_with_track("summary", &format!("Completed summary for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
-
-            // Skip reflection and query generation on the last loop
-            if loop_count < self.config.max_web_research_loops - 1 {
-                // Reflection and next query generation
-                let reflection_node = &self.nodes[3];
-                self.send_status_with_track("reflection", &format!("Starting reflection for loop {} on track {}...", loop_count + 1, track), None, Some(track));
-                let response = reflection_node.process(state.clone(), &self.config).await?;
-                
-                {
-                    let mut state_lock = state.lock().await;
-                    state_lock.increment_loop_count(track);
-                }
-                
-                self.send_status_with_track("reflection", &format!("Completed reflection for loop {} on track {}", loop_count + 1, track), Some(response), Some(track));
-            }
-
-            // Small delay between loops to ensure status updates are received in order
-            tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
         Ok(())
@@ -484,15 +484,14 @@ impl ResearchGraph {
                 .unwrap_or_default()
                 .as_secs();
 
-            let status = StatusUpdate {
-                phase: phase.to_string(),
-                message: message.to_string(),
-                elapsed_time: 0.0,
-                timestamp: now,
-                chain_of_thought,
-                track: track.map(|t| t.to_string()),
-                perspectives: None,
-            };
+            let mut status = StatusUpdate::default();
+            status.phase = phase.to_string();
+            status.message = message.to_string();
+            status.elapsed_time = 0.0;
+            status.timestamp = now;
+            status.chain_of_thought = chain_of_thought;
+            status.track = track.map(|t| t.to_string());
+            status.perspectives = None;
 
             match tx.send(status) {
                 Ok(_) => println!("Sent status update: phase={}, message={}, track={:?}", phase, message, track),
@@ -505,31 +504,7 @@ impl ResearchGraph {
         }
     }
 
-    fn send_status(&self, phase: &str, message: &str, perspectives: Option<DebatePerspectives>) {
-        if let Some(tx) = &self.status_tx {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs();
-
-            let status = StatusUpdate {
-                phase: phase.to_string(),
-                message: message.to_string(),
-                elapsed_time: 0.0,
-                timestamp: now,
-                chain_of_thought: None,
-                track: None,
-                perspectives,
-            };
-
-            match tx.send(status) {
-                Ok(_) => println!("Sent status update: phase={}, message={}", phase, message),
-                Err(e) => {
-                    eprintln!("Failed to send status update: {} (phase={}, message={})", e, phase, message);
-                }
-            }
-        } else {
-            eprintln!("No status sender available for update: phase={}, message={}", phase, message);
-        }
+    fn send_status_with_perspectives(&self, phase: &str, message: &str, perspectives: Option<DebatePerspectives>) {
+        self.send_status(phase, message, perspectives);
     }
 } 

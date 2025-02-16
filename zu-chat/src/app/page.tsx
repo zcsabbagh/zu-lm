@@ -34,27 +34,27 @@ interface SpeakerImage {
 
 export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
-  const [language, setLanguage] = useState<typeof LANGUAGES[number]["value"]>("English");
-  const [duration, setDuration] = useState<typeof DURATIONS[number]["value"]>("3");
-  const [researchSummary, setResearchSummary] = useState<string | null>(null);
-  const [audioSegments, setAudioSegments] = useState<ArrayBuffer[]>([]);
-  const [currentSegment, setCurrentSegment] = useState(0);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [transcript, setTranscript] = useState<Array<{ speaker: string; text: string }>>([]);
-  const [displayedMessages, setDisplayedMessages] = useState<Array<{ role: string; content: string }>>([]);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const { messages, setMessages } = useChat();
-  const [speakerImages, setSpeakerImages] = useState<SpeakerImage[]>([]);
   const [isGeneratingImages, setIsGeneratingImages] = useState(false);
   const [isReady, setIsReady] = useState(false);
+  const [language, setLanguage] = useState("English");
+  const [duration, setDuration] = useState("3");
+  const [audioSegments, setAudioSegments] = useState<ArrayBuffer[]>([]);
+  const [transcript, setTranscript] = useState<any[]>([]);
+  const [currentSegment, setCurrentSegment] = useState(0);
+  const [displayedMessages, setDisplayedMessages] = useState<any[]>([]);
+  const [speakerImages, setSpeakerImages] = useState<any[]>([]);
+  const [trackOne, setTrackOne] = useState<string | null>(null);
+  const [trackTwo, setTrackTwo] = useState<string | null>(null);
+  const [selectedTrack, setSelectedTrack] = useState<'one' | 'two'>('one');
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const { messages, setMessages } = useChat();
 
   useEffect(() => {
-    // Check for research summary in localStorage
-    const summary = localStorage.getItem('researchSummary');
-    if (summary) {
-      setResearchSummary(summary);
-      localStorage.removeItem('researchSummary');
-    }
+    // Load research summaries from localStorage
+    const trackOne = localStorage.getItem('researchSummaryTrackOne');
+    const trackTwo = localStorage.getItem('researchSummaryTrackTwo');
+    if (trackOne) setTrackOne(trackOne);
+    if (trackTwo) setTrackTwo(trackTwo);
   }, []);
 
   useEffect(() => {
@@ -93,10 +93,16 @@ export default function Home() {
   const handleGenerate = async () => {
     setIsGenerating(true);
     setIsReady(false);
-    setDisplayedMessages([]); // Clear previous messages
-    setCurrentSegment(0); // Reset segment counter
-    setSpeakerImages([]); // Clear previous images
+    setDisplayedMessages([]);
+    setCurrentSegment(0);
+    setSpeakerImages([]);
+    
     try {
+      const researchSummary = selectedTrack === 'one' ? trackOne : trackTwo;
+      if (!researchSummary) {
+        throw new Error('No research summary available');
+      }
+
       // Generate podcast audio
       const response = await fetch('/api/generate', {
         method: 'POST',
@@ -160,17 +166,19 @@ export default function Home() {
         }
 
         setSpeakerImages(imageData.images);
-        // Set ready state after both audio and images are generated
         setIsReady(true);
       } catch (error) {
         console.error('Error generating images:', error);
-        // Even if image generation fails, we can still proceed with audio
         setIsReady(true);
       } finally {
         setIsGeneratingImages(false);
       }
 
-      setResearchSummary(null);
+      // Clear the research summaries after successful generation
+      localStorage.removeItem('researchSummaryTrackOne');
+      localStorage.removeItem('researchSummaryTrackTwo');
+      setTrackOne(null);
+      setTrackTwo(null);
     } catch (error) {
       console.error('Generation error:', error);
       alert(error instanceof Error ? error.message : 'Failed to generate podcast');
@@ -191,55 +199,88 @@ export default function Home() {
         </Link>
       </div>
 
-      {researchSummary && (
-        <div className="mb-6 p-4 bg-green-50 rounded-md">
-          <h2 className="text-lg font-semibold mb-2">Research Summary Available</h2>
-          <p className="text-sm text-gray-600 mb-2">A research summary is ready to be used for podcast generation.</p>
-          <div className="bg-white p-3 rounded-md">
-            <p className="text-sm">{researchSummary.substring(0, 200)}...</p>
+      {(trackOne || trackTwo) && (
+        <div className="mb-6 space-y-4">
+          <h2 className="text-xl font-semibold">Research Perspectives</h2>
+          <div className="flex gap-4">
+            <button
+              onClick={() => setSelectedTrack('one')}
+              className={`px-4 py-2 rounded-md ${
+                selectedTrack === 'one' 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-200 text-gray-700'
+              }`}
+              disabled={!trackOne}
+            >
+              Perspective One
+            </button>
+            <button
+              onClick={() => setSelectedTrack('two')}
+              className={`px-4 py-2 rounded-md ${
+                selectedTrack === 'two' 
+                  ? 'bg-blue-500 text-white' 
+                  : 'bg-gray-200 text-gray-700'
+              }`}
+              disabled={!trackTwo}
+            >
+              Perspective Two
+            </button>
+          </div>
+          
+          <div className="bg-gray-50 p-4 rounded-md">
+            <h3 className="font-medium mb-2">
+              {selectedTrack === 'one' ? 'Perspective One' : 'Perspective Two'}
+            </h3>
+            <div className="prose max-w-none">
+              {selectedTrack === 'one' ? trackOne : trackTwo}
+            </div>
           </div>
         </div>
       )}
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Language</label>
-        <select
-          value={language}
-          onChange={(e) => setLanguage(e.target.value as typeof language)}
-          className="w-full p-2 border rounded-md"
-          disabled={isGenerating}
-        >
-          {LANGUAGES.map((lang) => (
-            <option key={lang.value} value={lang.value}>
-              {lang.label}
-            </option>
-          ))}
-        </select>
-      </div>
+      <div className="space-y-4">
+        <div className="flex gap-4">
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-2">Language</label>
+            <select
+              value={language}
+              onChange={(e) => setLanguage(e.target.value)}
+              className="w-full p-2 border rounded-md"
+              disabled={isGenerating}
+            >
+              {LANGUAGES.map((lang) => (
+                <option key={lang.value} value={lang.value}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          
+          <div className="flex-1">
+            <label className="block text-sm font-medium mb-2">Duration (minutes)</label>
+            <select
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="w-full p-2 border rounded-md"
+              disabled={isGenerating}
+            >
+              {DURATIONS.map((dur) => (
+                <option key={dur.value} value={dur.value}>
+                  {dur.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
 
-      <div className="mb-6">
-        <label className="block text-sm font-medium mb-2">Duration</label>
-        <select
-          value={duration}
-          onChange={(e) => setDuration(e.target.value as typeof duration)}
-          className="w-full p-2 border rounded-md"
-          disabled={isGenerating}
+        <button
+          onClick={handleGenerate}
+          disabled={isGenerating || (!trackOne && !trackTwo)}
+          className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
         >
-          {DURATIONS.map((dur) => (
-            <option key={dur.value} value={dur.value}>
-              {dur.label}
-            </option>
-          ))}
-        </select>
+          {isGenerating ? 'Generating...' : 'Generate Podcast'}
+        </button>
       </div>
-
-      <button
-        onClick={handleGenerate}
-        disabled={isGenerating}
-        className="w-full bg-blue-500 text-white px-4 py-2 rounded-md disabled:bg-gray-400"
-      >
-        {isGenerating ? 'Generating...' : 'Generate Podcast'}
-      </button>
 
       <audio ref={audioRef} className="hidden" />
 
