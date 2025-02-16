@@ -70,11 +70,11 @@ const SourceList = ({ sources, title }: SourceListProps) => {
   return (
     <div className="space-y-4">
       <h3 className="font-semibold text-lg">{title}</h3>
-      <div className="space-y-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {sources.map((source, index) => {
           const faviconUrl = source.url !== '#' 
             ? `https://www.google.com/s2/favicons?domain=${source.domain}&sz=32`
-            : '/default-favicon.png'; // You'll need to add this default image to your public folder
+            : '/default-favicon.png';
           
           return (
             <a 
@@ -85,18 +85,17 @@ const SourceList = ({ sources, title }: SourceListProps) => {
               className={`block ${source.url === '#' ? 'cursor-not-allowed' : ''}`}
               onClick={source.url === '#' ? (e) => e.preventDefault() : undefined}
             >
-              <div className="flex items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors">
+              <div className="flex items-center p-3 bg-gray-50 rounded-xl hover:bg-gray-100 transition-colors border border-gray-200">
                 <div className="flex items-center space-x-3 flex-1">
-                  <span className="text-gray-500 text-sm min-w-[24px]">{source.sourceNumber}</span>
-                  <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded overflow-hidden">
+                  <span className="text-gray-500 text-sm min-w-[24px] font-medium">{source.sourceNumber}</span>
+                  <div className="w-8 h-8 relative flex-shrink-0 bg-gray-200 rounded-lg overflow-hidden">
                     <Image
                       src={faviconUrl}
                       alt={source.domain || 'favicon'}
                       width={32}
                       height={32}
-                      className="rounded"
+                      className="rounded-lg"
                       onError={(e) => {
-                        // Fallback to default image on error
                         const imgElement = e.target as HTMLImageElement;
                         imgElement.src = '/default-favicon.png';
                       }}
